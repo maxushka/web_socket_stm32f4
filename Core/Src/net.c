@@ -4,6 +4,8 @@ struct new_connection
 {
   struct webworker *web;
   struct netconn *netconn;
+  char *request_data;
+  char *request_url;
 };
 
 static void http_receive_handle(struct webworker *web, struct netconn *conn);
@@ -15,7 +17,7 @@ extern struct http_file_system http_file_system;
 extern __IO char *sdram_http_address;
 char __IO *tmp_post = (__IO char*)(SDRAM_JSON_ADDRESS);
 char __IO *jsonbuf = (__IO char*)(SDRAM_JSON_BUF_ADDRESS);
-char* buf = NULL;
+
 int json_input_size = 0;
 
 /**
@@ -54,23 +56,24 @@ void http_server_netconn_thread(void * argument)
     /** Check available task and newconn */
     for (int iTask = 0; iTask < NET_MAX_CONNECTIONS; iTask++)
     {
+      net_thread *nth = &net_threads[iTask];
       /** If task handler not created or deleted, create */
-      if ( (eTaskGetState(net_threads[iTask].xHandle) == eDeleted) ||
-           (net_threads[iTask].xHandle == NULL) )
+      if ( (eTaskGetState(nth->xHandle) == eDeleted) ||
+           (nth->xHandle == NULL) )
       {
-        if (net_threads[iTask].newconn == NULL)
+        if (nth->newconn == NULL)
         {
           /* Accept icoming connection and create task for it */
           if (netconn_accept(conn, &newconn) == ERR_OK)
           {
-            net_threads[iTask].xHandle = NULL;
+            nth->xHandle = NULL;
             struct new_connection new_netconn = {
               .web = web,
               .netconn = newconn
             };
             /** The created task will delete the connection upon completion */
             xTaskCreate(http_receive_handle, "NewAccept", 1024, (void*)&new_netconn, 
-                        osPriorityNormal, &task_handles[iTask]);
+                        osPriorityNormal, &nth->newconn);
           }
         }
       }
@@ -101,16 +104,19 @@ static void http_receive_handle(void * argument)
   struct new_connection *newconn = (struct new_connection *)argument;
   struct webworker *web = newconn->webworker;
   struct netconn *conn = newconn->netconn;
+  struct netbuf *inbuf = NULL;
+  uint16_t buflen = 0;
+  char* pBuffer = NULL;
 
   char *header =  "HTTP/1.1 200 OK\nExpires: Mon, 26 Jul 1997 05:00:00 GMT\nCache-Control: max-age=0,no-cache,no-store,post-check=0,pre-check=0\nConnection: close\nPragma: no-cache\nExpires: 0\nAccess-Control-Allow-Origin: *\nContent-Type: application/json; charset=utf-8\n\n";
   char *headerOk =  "HTTP/1.1 200 OK\nConnection: close\r\n\r\n";
   char *headerNotFound = "HTTP/1.1 404 Not Found\r\n\r\n";
 
   uint8_t file_not_found = 0;
-  uint16_t buflen = 0;
-  struct netbuf *inbuf = NULL;
-  char* pStr = NULL;
-  bool isAuth = false;
+  
+  
+  
+  uint8_t isAuth = 0;
 
 
   char __IO* data = (char __IO*)(0xC0510000);
@@ -120,38 +126,48 @@ static void http_receive_handle(void * argument)
 
   for(;;)
   {
-    err_t res = netconn_recv(conn, &inbuf);
-    if (res == ERR_OK)
+    err_t err = netconn_recv(conn, &inbuf);
+    if (err == ERR_OK)
     {
-      netbuf_data(inbuf, (void**)&buf, &buflen);
-      /** Смотрим поле Cookie */
-      char *pAuthHead = strstr(buf, "Cookie:");
+      netbuf_data(inbuf, (void**)&pBuffer, &buflen);
+      /** Search field Cookie */
+      char *pAuthHead = strstr(pBuffer, "Cookie:");
       if (pAuthHead)
       {
-        /** Отделяем поле <token=> */
+        /** Detaching field <token=> */
         char *pToken = strstr(pAuthHead, "token=");
-        char *tmp = pvPortMalloc(32);
-        if (tmp != NULL)
+        if (pToken)
         {
-          strncpy(tmp, pToken+strlen("token="), 30);
-          pToken = strtok(tmp, "\r");
-          /** Проверяем token, Если он совпадает - мы авторизованы */
-          if (strcmp(pToken, web->token) == 0)
-            isAuth = true;
-          else
-            isAuth = false;
-          vPortFree(tmp);
+          /** Allocating a separate space for the strtok function */
+          char *tmp = pvPortMalloc(32);
+          if (tmp)
+          {
+            strncpy(tmp, pToken+strlen("token="), 30);
+            /** Get a token value */
+            pToken = strtok(tmp, "\r");
+            /** Client token validation with token issued by server */
+            if (strcmp(pToken, web->token) == 0)
+              isAuth = 1;
+            else
+              isAuth = 0;
+            vPortFree(tmp);
+          }
         }
       }
 
-      if ( (buflen >=5) && (strncmp(buf, "GET /", 5) == 0) )
+      if (strncmp(pBuffer, "GET /", 5) == 0)
       {
-        strcpy((char*)data, buf+strlen("GET "));
-        pStr = strtok((char*)data, " ");
-        if (strcmp(pStr, "/") == 0)
-          strcpy((char*)page, "/index.html");
-        else
-          strcpy((char*)page, pStr);
+        /** Copy request body */
+        strncpy(newconn->request_data, pBuffer+strlen("GET "), buflen);
+        char *pPage = strtok((char*)newconn->request_data, " ");
+        if (pPage)
+        {
+          if (strcmp(pPage, "/") == 0)
+            strcpy((char*)newconn->request_url, "/index.html");
+          else
+            strcpy((char*)newconn->request_url, pPage);
+        }
+
         /** Если запрос не начинается с .api, то это запрос страницы */
         if (strstr((char*)page, "api") == NULL)
         {
@@ -200,14 +216,14 @@ static void http_receive_handle(void * argument)
         }
       }
       /** Если это POST-запрос */
-      else if( (buflen >=5) && (strncmp(buf, "POST /", 6) == 0) )
+      else if( (buflen >=5) && (strncmp(pBuffer, "POST /", 6) == 0) )
       {
         for (int i = 0; i < 2048; i++)
           tmp_post[i] = 0;
-        memcpy((char*)tmp_post, buf, buflen);
+        memcpy((char*)tmp_post, pBuffer, buflen);
 
         struct netbuf *in;
-        strcpy((char*)data, buf+strlen("POST /"));
+        strcpy((char*)data, pBuffer+strlen("POST /"));
         char *url = strtok((char*)data, " ");
         /** Ищем указатель на входящую JSON-строку */
         char *pContLen = strstr((char*)tmp_post, "Content-Length: ");
@@ -230,8 +246,8 @@ static void http_receive_handle(void * argument)
           while (strlen(pContent) < json_input_size)//do
           {
             err_t res = netconn_recv(conn, &in);
-            netbuf_data(in, (void**)&buf, &buflen);
-            strncat((char*)tmp_post, buf, buflen);
+            netbuf_data(in, (void**)&pBuffer, &buflen);
+            strncat((char*)tmp_post, pBuffer, buflen);
             netbuf_delete(in);
             pContent = strstr((char*)tmp_post, "{\"json\":");
           } 
