@@ -1,12 +1,24 @@
 #include "net.h"
 
+char *head_js_resp = "HTTP/1.1 200 OK\n\
+                      Connection: close\n\
+                      Access-Control-Allow-Origin: *\n\
+                      Content-Type: application/json; charset=utf-8\n\n";
+char *head_ok_resp = "HTTP/1.1 200 OK\n\
+                      Connection: close\r\n\r\n";
+char *head_not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
+
 struct new_connection
 {
   struct webworker *web;
   struct netconn *netconn;
   char *request_data;
   char *request_url;
+  char *resp_js_buff;
+  uint32_t resp_js_buff_len;
 };
+
+static uint8_t cmp_cookie_token(char *pBuffer, char *token);
 
 static void http_receive_handle(struct webworker *web, struct netconn *conn);
 
@@ -16,7 +28,7 @@ static void http_receive_handle(struct webworker *web, struct netconn *conn);
 extern struct http_file_system http_file_system;
 extern __IO char *sdram_http_address;
 char __IO *tmp_post = (__IO char*)(SDRAM_JSON_ADDRESS);
-char __IO *jsonbuf = (__IO char*)(SDRAM_JSON_BUF_ADDRESS);
+// char __IO *jsonbuf = (__IO char*)(SDRAM_JSON_BUF_ADDRESS);
 
 int json_input_size = 0;
 
@@ -72,8 +84,8 @@ void http_server_netconn_thread(void * argument)
               .netconn = newconn
             };
             /** The created task will delete the connection upon completion */
-            xTaskCreate(http_receive_handle, "NewAccept", 1024, (void*)&new_netconn, 
-                        osPriorityNormal, &nth->newconn);
+            xTaskCreate(http_receive_handle, "NewAccept", 1024, 
+              (void*)&new_netconn, osPriorityNormal, &nth->newconn);
           }
         }
       }
@@ -85,7 +97,7 @@ void http_server_netconn_thread(void * argument)
  * [ws_server_netconn_thread description]
  * @param argument [description]
  */
-void ws_server_netconn_thread(void * argument)
+static void ws_server_netconn_thread(void * argument)
 {
   for(;;)
   {
@@ -93,6 +105,40 @@ void ws_server_netconn_thread(void * argument)
   }
 }
 
+/**
+ * [cmp_cookie_token description]
+ * @param  pBuffer [description]
+ * @param  token   [description]
+ * @return         [description]
+ */
+static uint8_t cmp_cookie_token(char *pBuffer, char *token)
+{
+  uint8_t auth = 0;
+  char *pAuthHead = strstr(pBuffer, "Cookie:");
+  if (pAuthHead)
+  {
+    /** Detaching field <token=> */
+    char *pToken = strstr(pAuthHead, "token=");
+    if (pToken)
+    {
+      /** Allocating a separate space for the strtok function */
+      char *tmp = pvPortMalloc(32);
+      if (tmp)
+      {
+        strncpy(tmp, pToken+strlen("token="), 30);
+        /** Get a token value */
+        pToken = strtok(tmp, "\r");
+        /** Client token validation with token issued by server */
+        if (strcmp(pToken, token) == 0)
+          auth = 1;
+        else
+          auth = 0;
+        vPortFree(tmp);
+      }
+    }
+  }
+  return auth;
+}
 
 /**
  * [http_receive_handle description]
@@ -104,25 +150,11 @@ static void http_receive_handle(void * argument)
   struct new_connection *newconn = (struct new_connection *)argument;
   struct webworker *web = newconn->webworker;
   struct netconn *conn = newconn->netconn;
+  struct website_file_system *wsfs = web->wsfs;
   struct netbuf *inbuf = NULL;
   uint16_t buflen = 0;
   char* pBuffer = NULL;
-
-  char *header =  "HTTP/1.1 200 OK\nExpires: Mon, 26 Jul 1997 05:00:00 GMT\nCache-Control: max-age=0,no-cache,no-store,post-check=0,pre-check=0\nConnection: close\nPragma: no-cache\nExpires: 0\nAccess-Control-Allow-Origin: *\nContent-Type: application/json; charset=utf-8\n\n";
-  char *headerOk =  "HTTP/1.1 200 OK\nConnection: close\r\n\r\n";
-  char *headerNotFound = "HTTP/1.1 404 Not Found\r\n\r\n";
-
-  uint8_t file_not_found = 0;
-  
-  
-  
   uint8_t isAuth = 0;
-
-
-  char __IO* data = (char __IO*)(0xC0510000);
-  char __IO* page = (char __IO*)(0xC051F000);
-  memset((char*)data, 0x00, 1000);
-  memset((char*)page, 0x00, 100);
 
   for(;;)
   {
@@ -130,35 +162,14 @@ static void http_receive_handle(void * argument)
     if (err == ERR_OK)
     {
       netbuf_data(inbuf, (void**)&pBuffer, &buflen);
-      /** Search field Cookie */
-      char *pAuthHead = strstr(pBuffer, "Cookie:");
-      if (pAuthHead)
-      {
-        /** Detaching field <token=> */
-        char *pToken = strstr(pAuthHead, "token=");
-        if (pToken)
-        {
-          /** Allocating a separate space for the strtok function */
-          char *tmp = pvPortMalloc(32);
-          if (tmp)
-          {
-            strncpy(tmp, pToken+strlen("token="), 30);
-            /** Get a token value */
-            pToken = strtok(tmp, "\r");
-            /** Client token validation with token issued by server */
-            if (strcmp(pToken, web->token) == 0)
-              isAuth = 1;
-            else
-              isAuth = 0;
-            vPortFree(tmp);
-          }
-        }
-      }
+      isAuth = cmp_cookie_token(pBuffer, web->token);
 
       if (strncmp(pBuffer, "GET /", 5) == 0)
       {
         /** Copy request body */
+        /** TODO: check request_data length buffer and buflen */
         strncpy(newconn->request_data, pBuffer+strlen("GET "), buflen);
+        /** Get the page name */
         char *pPage = strtok((char*)newconn->request_data, " ");
         if (pPage)
         {
@@ -168,55 +179,51 @@ static void http_receive_handle(void * argument)
             strcpy((char*)newconn->request_url, pPage);
         }
 
-        /** Если запрос не начинается с .api, то это запрос страницы */
-        if (strstr((char*)page, "api") == NULL)
+        /* If the request does not start with .api, 
+         * then this is a page request */
+        if (strstr((char*)newconn->request_url, "api") == NULL)
         {
-          file_not_found = 1;
-          /** Если мы не авторизованы, перенаправляем клинта на страницу авторизации */
-          if (isAuth == false)
+          int file_not_found = 1;
+          /** If the authorization is not successful, 
+          the client is redirected to the authorization page */
+          if (isAuth == 0)
           {
-            if (strstr((char*)page, "html") != NULL)
-            {
-              sprintf((char*)page, "/auth.html");
-            }
+            sprintf((char*)newconn->request_url, "/auth.html");
           }
-          /** По наименованию ищем файл в http_file_system.http_file_store */
-          for (int iFile = 0; iFile < http_file_system.http_file_cnt; iFile++)
+          /** Search for file name in structure website_file_system */
+          for (int iFile = 0; iFile < wsfs->files_cnt; iFile++)
           {
-            if (strcmp((char*)page+1, http_file_system.http_file_store[iFile].file_name) == 0)
+            if ( strcmp((char*)newconn->request_url+1, 
+                        wsfs->files[iFile].file_name) == 0 )
             {
               file_not_found = 0;
-              /** И возвращаем указатель на него с нужным смещением */
-              netconn_write(conn, (const unsigned char*)(sdram_http_address+http_file_system.http_file_store[iFile].offset), 
-                                                        (size_t)http_file_system.http_file_store[iFile].page_size, NETCONN_NOCOPY);
+              /** Returning the contents of the requested file */
+              netconn_write(conn, wsfs->flash_addr+wsfs->files[iFile].offset, 
+                            wsfs->files[iFile].page_size, NETCONN_NOCOPY);
               osDelay(10);
               break;
             }
           }
-          /** Если файл не найден, возвращаем заголовок 404 */
           if (file_not_found == 1)
           {
-            netconn_write(conn, (const unsigned char*)(headerNotFound), (size_t)strlen(headerNotFound), NETCONN_COPY);
+            netconn_write(conn, head_not_found, strlen(head_not_found), 
+                          NETCONN_COPY);
           }
         }
-        /** Если это пользовательский запрос GET*/
+        /** If this is a custom GET request */
         else
         {
-          printf("Clear jsonbuf\n");
-          memset((char*)jsonbuf, 0x00, 2048);
-          /** Вызываем обработчик GET-запросов, который возвращает JSON-строку */
-          printf("Call get handler\n");
-          char *json = web->getHandler((char*)page);
-          printf("Return from get handler\n");
-          /** Совмещаем ее вместе с заголовком и возвращаем клиенту */
-          strcat((char*)jsonbuf, header);
-          strcat((char*)jsonbuf, json);
-          //printf("Response json: %s\n", jsonbuf);
-          netconn_write(conn, (const unsigned char*)(jsonbuf), (size_t)strlen((char*)jsonbuf), NETCONN_NOCOPY);
+          memset((char*)newconn->resp_js_buff, 0, newconn->resp_js_buff_len);
+          char *resp_json = web->getHandler((char*)newconn->request_url);
+          strcat((char*)newconn->js_buff, head_js_resp);
+          strcat((char*)newconn->js_buff, resp_json);
+          netconn_write(conn, newconn->js_buff, 
+                        strlen((char*)newconn->js_buff), NETCONN_NOCOPY);
         }
       }
+
       /** Если это POST-запрос */
-      else if( (buflen >=5) && (strncmp(pBuffer, "POST /", 6) == 0) )
+      else if( (strncmp(pBuffer, "POST /", 6) == 0) )
       {
         for (int i = 0; i < 2048; i++)
           tmp_post[i] = 0;
