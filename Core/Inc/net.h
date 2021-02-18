@@ -10,15 +10,7 @@
 
 #define NET_MAX_CONNECTIONS   5
 
-struct webworker
-{
-  bool head_auth;
-  bool auth;
-  char token[32];
-  char crnt_user[32];
-  char *(*getHandler) (char *params);
-  char *(*postHandler) (char* url, char *json, struct webworker *web);
-};
+
 
 struct website_file
 {
@@ -30,8 +22,19 @@ struct website_file
 struct website_file_system
 {
   __IO uint8_t *flash_addr;
-  uint32_t file_cnt;
+  uint32_t files_cnt;
   struct website_file *files;
+};
+
+struct webworker
+{
+  struct website_file_system *wsfs;
+  bool head_auth;
+  bool auth;
+  char token[32];
+  char crnt_user[32];
+  char *(*getHandler) (char *params);
+  char *(*postHandler) (char* url, char *json, struct webworker *web);
 };
 
 void http_server_netconn_thread(void * argument);
