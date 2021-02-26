@@ -8,6 +8,13 @@ char *head_ok_resp = "HTTP/1.1 200 OK\n\
                       Connection: close\r\n\r\n";
 char *head_not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
 
+char *head_ws = "HTTP/1.1 101 Switching Protocols\n\
+                 Upgrade: websocket\n\
+                 Connection: Upgrade\n\
+                 Sec-WebSocket-Accept: ";
+
+const char *ws_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
 struct new_connection
 {
   struct webworker *web;
@@ -18,11 +25,13 @@ struct new_connection
   uint32_t resp_js_buff_len;
 };
 
+
+
 static uint8_t cmp_cookie_token(char *pBuffer, char *token);
 
-static void http_receive_handle(struct webworker *web, struct netconn *conn);
-
-
+static void http_receive_handler(struct webworker *web, struct netconn *conn);
+static void ws_server_thread(void * argument);
+static void get_ws_key(char *buf, char *key);
 
 
 extern struct http_file_system http_file_system;
@@ -36,7 +45,7 @@ int json_input_size = 0;
  * [http_server_netconn_thread description]
  * @param argument [description]
  */
-void http_server_netconn_thread(void * argument)
+void net_http_server_thread(void * argument)
 { 
   struct netconn *conn, *newconn;
   struct webworker *web = (struct webworker*)argument;
@@ -58,8 +67,8 @@ void http_server_netconn_thread(void * argument)
   if (err != ERR_OK)
     vTaskDelete(NULL);
   /** Create WebSocket thread*/
-  sys_thread_new("websocket", ws_server_netconn_thread, 
-                  NULL, 1024, osPriorityNormal);
+  sys_thread_new("websocket", ws_server_thread, 
+                  (void*)web->ws, 1024, osPriorityNormal);
   
   /* Put the connection into LISTEN state */
   netconn_listen(conn);
@@ -84,7 +93,7 @@ void http_server_netconn_thread(void * argument)
               .netconn = newconn
             };
             /** The created task will delete the connection upon completion */
-            xTaskCreate(http_receive_handle, "NewAccept", 1024, 
+            xTaskCreate(http_receive_handler, "NewAccept", 1024, 
               (void*)&new_netconn, osPriorityNormal, &nth->newconn);
           }
         }
@@ -97,12 +106,57 @@ void http_server_netconn_thread(void * argument)
  * [ws_server_netconn_thread description]
  * @param argument [description]
  */
-static void ws_server_netconn_thread(void * argument)
+static void ws_server_thread(void * argument)
 {
+  struct websocket *ws = (struct websocket*)argument;
+  struct netconn *ws_con, *accept_sock;
+  struct netbuf *inbuf = NULL;
+  char* pInbuf = NULL;
+  uint16_t size_inbuf = 0;
+
+  /* Create a new TCP connection handle */
+  ws_con = netconn_new(NETCONN_TCP);
+  if (ws_con == NULL)
+    vTaskDelete(NULL);
+
+  /* Bind to port (WS) with default IP address */
+  if (netconn_bind(ws_con, NULL, 8766) != ERR_OK)
+    vTaskDelete(NULL);
+
+  netconn_listen(ws_con);
+
   for(;;)
   {
+    if (netconn_accept(ws_con, &accept_sock) == ERR_OK)
+    {
+      /** Create send thread */
 
+      while (netconn_recv(conn, &inbuf) == ERR_OK)
+      {
+        netbuf_data(inbuf, (void**)&pInbuf, &size_inbuf);
+        if (strncmp(pInbuf, "GET /", 5) == 0)
+        {
+          get_ws_key(pInbuf, ws->key);
+          sprintf(ws->concat_key, "%s%s", ws->key, ws_guid);
+
+          mbedtls_sha1((unsigned char *)ws->concat_key, 60, ws->hash);
+          int len = 0;
+          mbedtls_base64_encode(ws->hash_base64, 100, &len, ws->hash, 20);
+          sprintf(ws->send_buf, "%s%s", head_ws, ws->hash_base64);
+          netconn_write(ws_con, ws->send_buf, strlen(ws->send_buf), NETCONN_NOCOPY);
+        }
+
+        netbuf_delete(inbuf);
+      }
+      netconn_close(ws_con);
+      /** Delete tcp send thread */
+    }
   }
+}
+
+static void get_ws_key(char *buf, char *key)
+{
+
 }
 
 /**
@@ -145,7 +199,7 @@ static uint8_t cmp_cookie_token(char *pBuffer, char *token)
  * @param web  [description]
  * @param conn [description]
  */
-static void http_receive_handle(void * argument)
+static void http_receive_handler(void * argument)
 {
   struct new_connection *newconn = (struct new_connection *)argument;
   struct webworker *web = newconn->webworker;
@@ -158,8 +212,7 @@ static void http_receive_handle(void * argument)
 
   for(;;)
   {
-    err_t err = netconn_recv(conn, &inbuf);
-    if (err == ERR_OK)
+    if (netconn_recv(conn, &inbuf) == ERR_OK)
     {
       netbuf_data(inbuf, (void**)&pBuffer, &buflen);
       isAuth = cmp_cookie_token(pBuffer, web->token);
@@ -206,7 +259,7 @@ static void http_receive_handle(void * argument)
           }
           if (file_not_found == 1)
           {
-            netconn_write(conn, head_not_found, strlen(head_not_found), 
+            netconn_write(conn, head_not_found, strlen(head_not_found),
                           NETCONN_COPY);
           }
         }

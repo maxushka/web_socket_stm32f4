@@ -10,7 +10,14 @@
 
 #define NET_MAX_CONNECTIONS   5
 
-
+struct websocket
+{
+  char key[32];
+  char concat_key[128];
+  char hash[512];
+  char hash_base64[512];
+  char send_buf[1024];
+};
 
 struct website_file
 {
@@ -33,6 +40,7 @@ struct webworker
   bool auth;
   char token[32];
   char crnt_user[32];
+  struct websocket ws;
   char *(*getHandler) (char *params);
   char *(*postHandler) (char* url, char *json, struct webworker *web);
 };
