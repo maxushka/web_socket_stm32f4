@@ -21,7 +21,7 @@ struct websocket
 
 struct website_file
 {
-  char file_name[32];
+  char file_name[64];
   int offset;
   int page_size;
 };
@@ -35,9 +35,9 @@ struct website_file_system
 
 struct webworker
 {
-  struct website_file_system *wsfs;
-  bool head_auth;
-  bool auth;
+  struct website_file_system wsfs;
+  uint8_t head_auth;
+  uint8_t auth;
   char token[32];
   char crnt_user[32];
   struct websocket ws;
@@ -45,6 +45,7 @@ struct webworker
   char *(*postHandler) (char* url, char *json, struct webworker *web);
 };
 
-void http_server_netconn_thread(void * argument);
+uint8_t net_create_filesystem(struct website_file_system *wsfs);
+void net_http_server_thread(void * argument);
 
 #endif
