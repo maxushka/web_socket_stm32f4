@@ -1,0 +1,12 @@
+web_socket_stm32f4\platform_util.o: ../Middlewares/Third_Party/mbedTLS/library/platform_util.c
+web_socket_stm32f4\platform_util.o: ../MBEDTLS/App/mbedtls_config.h
+web_socket_stm32f4\platform_util.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/check_config.h
+web_socket_stm32f4\platform_util.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
+web_socket_stm32f4\platform_util.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/platform_util.h
+web_socket_stm32f4\platform_util.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
+web_socket_stm32f4\platform_util.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/platform.h
+web_socket_stm32f4\platform_util.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
+web_socket_stm32f4\platform_util.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
+web_socket_stm32f4\platform_util.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\time.h
+web_socket_stm32f4\platform_util.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/threading.h
+web_socket_stm32f4\platform_util.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

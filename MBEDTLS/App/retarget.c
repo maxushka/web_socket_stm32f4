@@ -22,7 +22,7 @@ extern "C" {
 #define DEFAULT_HANDLE 0x100;
 
 /*
- * These names are special strings which will be recognized by 
+ * These names are special strings which will be recognized by
  * _sys_open and will cause it to return the standard I/O handles, instead
  * of opening a real file.
  */
@@ -36,7 +36,7 @@ const char __stderr_name[]="STDERR";
  */
 FILEHANDLE _sys_open(const char * name, int openmode)
 {
-    return DEFAULT_HANDLE;  
+    return DEFAULT_HANDLE;
 }
 
 /*
@@ -56,8 +56,8 @@ int _sys_close(FILEHANDLE fh)
 int _sys_write(FILEHANDLE fh, const unsigned char * buf,
                unsigned len, int mode)
 {
-   
-    return 0;   
+
+    return 0;
 }
 
 /*
@@ -68,13 +68,13 @@ int _sys_write(FILEHANDLE fh, const unsigned char * buf,
  *    the read was partially successful due to end of file
  *  - -1 if some error other than EOF occurred
  * This function receives a character from the UART, processes the character
- * if required (backspace) and then echo the character to the Terminal 
- * Emulator, printing the correct sequence after successive keystrokes.  
+ * if required (backspace) and then echo the character to the Terminal
+ * Emulator, printing the correct sequence after successive keystrokes.
  */
 int _sys_read(FILEHANDLE fh, unsigned char * buf,
               unsigned len, int mode)
 {
-     return 0;       
+     return 0;
 }
 
 /*
@@ -82,8 +82,8 @@ int _sys_read(FILEHANDLE fh, unsigned char * buf,
  * for last-resort error message output.
  */
 void _ttywrch(int ch)
-{ 
- for (;;); 
+{
+ for (;;);
 }
 
 /*
@@ -96,7 +96,7 @@ int _sys_istty(FILEHANDLE fh)
 
 /*
  * Move the file position to a given offset from the file start.
- * Returns >=0 on success, <0 on failure. Seeking is not supported for the 
+ * Returns >=0 on success, <0 on failure. Seeking is not supported for the
  * UART.
  */
 int _sys_seek(FILEHANDLE fh, long pos)
@@ -156,7 +156,7 @@ void _sys_exit(int returncode)
 time_t time(time_t *p)
   {
     return 0;
-   
+
   }
 
 #ifdef __cplusplus

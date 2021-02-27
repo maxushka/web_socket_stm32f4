@@ -25,7 +25,7 @@
 #include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */     
+/* USER CODE BEGIN Includes */
 #include "net.h"
 /* USER CODE END Includes */
 
@@ -46,7 +46,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-extern struct website_file_system website;
+extern struct webworker webworker;
 /* USER CODE END Variables */
 osThreadId MainTaskHandle;
 osThreadId SecondTaskHandle;
@@ -129,33 +129,21 @@ void MX_FREERTOS_Init(void) {
 void thread_MainTask(void const * argument)
 {
   /* USER CODE BEGIN thread_MainTask */
-
+  MX_LWIP_Init();
   /** Get a cont files of website and make site catalogue */
-  memcpy(&website.file_cnt, 
-         (uint8_t*)website.flash_addr, 
-         sizeof(uint32_t));
-  if ( (website.file_cnt > 0) && (website.file_cnt < 0xFFFFFFFF))
+  if (net_create_filesystem(&webworker.wsfs) == 0)
   {
-    int size_files = sizeof(struct website_file)*website.file_cnt;
-    website.files = pvPortMalloc(size_files);
-    if (website.files != NULL)
-    {
-      memcpy(website.files, 
-            (uint8_t*)website.flash_addr+sizeof(uint32_t),
-            size_files);
-    }
+    /** Create new token and start http server */
+    uint32_t new_token = 123456;
+    //HAL_RNG_GenerateRandomNumber(&hrng, &new_token);
+    sprintf(webworker.token, "%x", new_token);
+    sys_thread_new("HTTP", net_http_server_thread, (void*)&webworker, 1024, osPriorityNormal);
   }
-  /** Create new token and start http server */
-  uint32_t new_token = 0;
-  HAL_RNG_GenerateRandomNumber(&hrng, &new_token);
-  sprintf(webworker.token, "%x", new_token);
-  sys_thread_new("HTTP", http_server_netconn_thread, 
-                (void*)&webworker, 4096, osPriorityNormal);
   /* Infinite loop */
   for(;;)
   {
     osDelay(100);
-    vTaskSuspend(NULL);
+    //vTaskSuspend(NULL);
   }
   /* USER CODE END thread_MainTask */
 }

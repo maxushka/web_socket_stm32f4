@@ -55,7 +55,7 @@ void MX_MBEDTLS_Init(void)
 /**
   * @}
   */
- 
+
 /**
   * @}
   */
