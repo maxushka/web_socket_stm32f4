@@ -25,6 +25,7 @@ static uint8_t cmp_cookie_token(char *pBuffer, char *token);
 static void http_receive_handler(void * argument);
 static void ws_server_thread(void * argument);
 static void get_ws_key(char *buf, char *key);
+static uint8_t ws_binary_pack_len(uint32_t len, uint8_t *outbuf);
 
 
 /**
@@ -195,13 +196,42 @@ static void ws_send_thread(void * argument)
  * [netws_send_string_message description]
  * @param msg [description]
  */
-void netws_send_string_message(char *msg)
+void netws_send_string_message(char *msg, uint32_t len)
 {
   /**
    * len
    * max len check
    * msg
    */
+  // xQueueSend(wsSendQueue, ())
+}
+
+static uint8_t get_binary_pack_len(uint8_t *buf)
+{
+
+}
+
+/**
+ * [ws_binary_pack_len description]
+ * @param  len     [description]
+ * @param  outbuf  [description]
+ * @param  bytecnt [description]
+ * @return         [description]
+ */
+static uint8_t ws_binary_pack_len(uint32_t len, uint8_t *outbuf)
+{
+  uint8_t tmp_byte = 0, bytecnt = 0;
+  for (uint8_t iByte = 4; iByte >= 0; --iByte)
+  {
+    tmp_byte = ( len >> (7 * iByte)) & 0x7F;
+    if (tmp_byte != 0)
+    {
+      tmp_byte = (iByte != 0) ? (tmp_byte | 0x80) : tmp_byte;
+      outbuf[bytecnt] = tmp_byte;
+      bytecnt++;
+    }
+  }
+  return bytecnt;
 }
 
 /**
