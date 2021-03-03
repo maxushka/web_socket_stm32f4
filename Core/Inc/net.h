@@ -45,6 +45,13 @@ struct webworker
   char *(*postHandler) (char* url, char *json, struct webworker *web);
 };
 
+typedef struct 
+{
+  struct netconn *newconn;
+  TaskHandle_t xHandle;
+  uint8_t iswork;
+} net_thread;
+
 struct new_connection
 {
   struct webworker *web;
@@ -53,14 +60,9 @@ struct new_connection
   char request_url[32];
   char resp_js_buff[32];
   uint32_t resp_js_buff_len;
+  net_thread *self_handle;
 };
 
-typedef struct 
-{
-  struct netconn *newconn;
-  TaskHandle_t xHandle;
-  uint8_t iswork;
-} net_thread;
 
 
 uint8_t net_create_filesystem(struct website_file_system *wsfs);

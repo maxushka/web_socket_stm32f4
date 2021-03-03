@@ -24,8 +24,11 @@ QueueHandle_t wsSendQueue;
 static uint8_t cmp_cookie_token(char *pBuffer, char *token);
 static void http_receive_handler(void * argument);
 static void ws_server_thread(void * argument);
-static void get_ws_key(char *buf, char *key);
-static uint8_t ws_binary_pack_len(uint32_t len, uint8_t *outbuf);
+static uint8_t get_ws_key(char *buf, char *key);
+static void ws_send_thread(void * argument);
+static uint8_t ws_create_binary_len(uint32_t len, uint8_t *outbuf);
+static int8_t http_send_response(struct netconn *conn, unsigned char *data, uint32_t len);
+static void http_send_task(void *arg);
 
 
 /**
@@ -74,6 +77,9 @@ void net_http_server_thread(void * argument)
   /** Create WebSocket thread*/
   sys_thread_new("websocket", ws_server_thread, 
                   (void*)&web->ws, 1024, osPriorityNormal);
+
+  sys_thread_new("httpsend", http_send_task, 
+                NULL, 128, osPriorityNormal);
   
   /* Put the connection into LISTEN state */
   netconn_listen(conn);
@@ -93,13 +99,14 @@ void net_http_server_thread(void * argument)
         /* Accept icoming connection and create task for it */
         if (netconn_accept(conn, &nth->newconn) == ERR_OK)
         {
+          nth->iswork = 1;
           struct new_connection new_netconn = {
             .web = web,
             .netconn = nth->newconn,
-            .iswork = 1
+            .self_handle = nth
           };
           /** The created task will delete the connection upon completion */
-          xTaskCreate(http_receive_handler, "NewAccept", 1024, 
+          xTaskCreate(http_receive_handler, "NewAccept", 128, 
             (void*)&new_netconn, osPriorityNormal, &nth->xHandle);
         }
       }
@@ -139,8 +146,8 @@ static void ws_server_thread(void * argument)
        * Create a task for sending messages to client
        * Accepted socket is the argument for a task function
        */
-      xTaskCreate(ws_send_thread, "send_thread", 255, 
-        (void*)accept_sock, osPriorityNormal, &SendTaskHandle);
+      //xTaskCreate(ws_send_thread, "send_thread", 255, 
+      //  (void*)accept_sock, osPriorityNormal, &SendTaskHandle);
 
       /** Receive incomming messages */
       while (netconn_recv(accept_sock, &inbuf) == ERR_OK)
@@ -166,9 +173,9 @@ static void ws_server_thread(void * argument)
         netbuf_delete(inbuf);
       }
       netconn_close(accept_sock);
-      netconn_delete(conn);
+      netconn_delete(accept_sock);
       /** Delete tcp send thread */
-      vTaskDelete(SendTaskHandle);
+      //vTaskDelete(SendTaskHandle);
     }
   }
 }
@@ -180,7 +187,7 @@ static void ws_server_thread(void * argument)
 static void ws_send_thread(void * argument)
 {
   struct netconn *ws_con = (struct netconn*)argument;
-
+  uint8_t recv_struct;
   wsSendQueue = xQueueCreate( 5, sizeof( uint8_t /* temp size */ ));
   if (wsSendQueue == NULL)
     vTaskDelete(NULL);
@@ -218,7 +225,7 @@ static uint8_t get_binary_pack_len(uint8_t *buf)
  * @param  bytecnt [description]
  * @return         [description]
  */
-static uint8_t ws_binary_pack_len(uint32_t len, uint8_t *outbuf)
+static uint8_t ws_create_binary_len(uint32_t len, uint8_t *outbuf)
 {
   uint8_t tmp_byte = 0, bytecnt = 0;
   for (uint8_t iByte = 4; iByte >= 0; --iByte)
@@ -248,7 +255,7 @@ static uint8_t get_ws_key(char *buf, char *key)
   {
     p = p + strlen("Sec-WebSocket-Key: ");
     size_t size = strchr(p, '\r') - p;
-    strncpy(out, p, size);
+    strncpy(key, p, size);
     err = 0;
   }
   return err;
@@ -286,6 +293,48 @@ static uint8_t cmp_cookie_token(char *pBuffer, char *token)
     }
   }
   return auth;
+}
+
+struct http_send
+{
+  struct netconn *conn;
+  uint32_t len;
+  unsigned char* data;
+  QueueHandle_t *queue;
+};
+
+QueueHandle_t httpSendQueue;
+
+static int8_t http_send_response(struct netconn *conn, unsigned char *data, uint32_t len)
+{
+  int8_t resp = 1;
+  QueueHandle_t queue = xQueueCreate(1, sizeof(int8_t));
+  struct http_send http_send = {
+    .conn = conn,
+    .data = data,
+    .len = len,
+    .queue = &queue
+  };
+  xQueueSend(httpSendQueue, &http_send, 0);
+  if (xQueueReceive(queue, &resp, pdMS_TO_TICKS(300)) == pdTRUE)
+    resp = 0;
+  vQueueDelete(queue);
+  return resp;
+}
+
+static void http_send_task(void *arg)
+{
+  httpSendQueue = xQueueCreate( 5, sizeof(struct http_send));
+  struct http_send send;
+  int8_t res = 0;
+
+  for(;;)
+  {
+    xQueueReceive(httpSendQueue, &send, portMAX_DELAY);
+    netconn_write(send.conn, send.data, send.len, NETCONN_NOCOPY);
+    osDelay(70);
+    xQueueSend(*send.queue, &res, 0);
+  }
 }
 
 /**
@@ -347,8 +396,9 @@ static void http_receive_handler(void * argument)
             {
               file_not_found = 0;
               /** Returning the contents of the requested file */
-              netconn_write(conn, (unsigned char*)wsfs->flash_addr+wsfs->files[iFile].offset, 
-                            wsfs->files[iFile].page_size, NETCONN_COPY);
+              //netconn_write(conn, (unsigned char*)wsfs->flash_addr+wsfs->files[iFile].offset, 
+              //              wsfs->files[iFile].page_size, NETCONN_NOCOPY);
+              http_send_response(conn, (unsigned char*)wsfs->flash_addr+wsfs->files[iFile].offset, wsfs->files[iFile].page_size);
               osDelay(10);
               break;
             }
@@ -428,13 +478,14 @@ static void http_receive_handler(void * argument)
 //          netconn_write(conn, (const unsigned char*)(head_ok_resp), (size_t)strlen(head_ok_resp), NETCONN_COPY);
 //        }
 //      }
+      
     }
     /** Close connection, clear netbuf and connection */
     netconn_close(conn);
     netbuf_delete(inbuf);
     netconn_delete(conn);
     /** Now the task not work */
-    newconn->iswork = 0;
+    newconn->self_handle->iswork = 0;
     vTaskDelete(NULL);
   }
 }
