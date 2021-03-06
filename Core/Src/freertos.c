@@ -106,7 +106,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* definition and creation of MainTask */
-  osThreadDef(MainTask, thread_MainTask, osPriorityNormal, 0, 128);
+  osThreadDef(MainTask, thread_MainTask, osPriorityNormal, 0, 512);
   MainTaskHandle = osThreadCreate(osThread(MainTask), NULL);
 
   /* definition and creation of SecondTask */
@@ -130,8 +130,9 @@ void thread_MainTask(void const * argument)
 {
   /* USER CODE BEGIN thread_MainTask */
   MX_LWIP_Init();
+  HAL_Delay(3000);
   /** Get a cont files of website and make site catalogue */
-  if (net_create_filesystem(&webworker.wsfs) == 0)
+  //if (net_create_filesystem(&webworker.wsfs) == 0)
   {
     /** Create new token and start http server */
     uint32_t new_token = 123456;
@@ -161,7 +162,7 @@ void thread_SecondTask(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(100);
   }
   /* USER CODE END thread_SecondTask */
 }

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-#define NET_MAX_CONNECTIONS   5
+#define NET_HTTP_MAX_CONNECTIONS   1
 
 struct websocket
 {
@@ -47,10 +47,14 @@ struct webworker
 
 typedef struct 
 {
-  struct netconn *newconn;
-  TaskHandle_t xHandle;
-  uint8_t iswork;
-} net_thread;
+  struct netconn *netconn;
+  struct webworker *web;
+  char request_data[1024];
+  char request_url[32];
+  char resp_js_buff[32];
+  uint8_t isopen;
+  uint32_t resp_js_buff_len;
+} net_connection;
 
 struct new_connection
 {
@@ -60,7 +64,6 @@ struct new_connection
   char request_url[32];
   char resp_js_buff[32];
   uint32_t resp_js_buff_len;
-  net_thread *self_handle;
 };
 
 
