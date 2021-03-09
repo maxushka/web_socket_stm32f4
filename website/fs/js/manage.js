@@ -6,7 +6,7 @@ function create_connection_websocket() {
     console.log("Соединение установлено");
   };
   socket.onmessage = function(event) {
-
+    console.log(event.data);
   };
   socket.onclose = function(event) {
     console.log('Соединение прервано');

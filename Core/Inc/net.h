@@ -8,15 +8,31 @@
 #include <string.h>
 #include <stdbool.h>
 
-#define NET_HTTP_MAX_CONNECTIONS   1
+#define NET_HTTP_MAX_CONNECTIONS   2
+
+
+typedef enum
+{
+  WS_STRING = 1,
+  WS_BINARY = 2
+} ws_msg_type;
+
+typedef struct
+{
+  ws_msg_type type;
+  uint8_t *msg;
+  uint32_t len;
+} ws_msg;
 
 struct websocket
 {
+  struct netconn *accepted_sock;
   char key[32];
   char concat_key[128];
   char hash[512];
   char hash_base64[512];
-  char send_buf[1024];
+  uint8_t send_buf[1024];
+  uint8_t established;
 };
 
 struct website_file
@@ -70,5 +86,6 @@ struct new_connection
 
 uint8_t net_create_filesystem(struct website_file_system *wsfs);
 void net_http_server_thread(void * argument);
+void netws_send_message(uint8_t *msg, uint32_t len, ws_msg_type type);
 
 #endif

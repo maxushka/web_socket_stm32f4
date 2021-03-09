@@ -11,10 +11,7 @@ char *head_ok_resp = "HTTP/1.1 200 OK\n\
                       Connection: close\r\n\r\n";
 char *head_not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
 
-char *head_ws = "HTTP/1.1 101 Switching Protocols\n\
-                 Upgrade: websocket\n\
-                 Connection: Upgrade\n\
-                 Sec-WebSocket-Accept: ";
+char *head_ws = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
 
 const char *ws_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -67,16 +64,12 @@ uint8_t net_create_filesystem(struct website_file_system *wsfs)
 static uint8_t net_create_receive_threads(void)
 {
   uint8_t err = 0;
-  TaskHandle_t xHandle = NULL;
   http_recv_queue = xQueueCreate( NET_HTTP_MAX_CONNECTIONS , sizeof( net_connection* ));
   if (http_recv_queue == NULL)
-    return 2;
+    return 1;
   for (int i = 0; i < NET_HTTP_MAX_CONNECTIONS; ++i)
   {
-    //if (xTaskCreate(http_receive_handler, "http_receive", 
-    //                128, NULL, osPriorityNormal, &xHandle) != pdTRUE)
     sys_thread_new("http_recv", http_receive_handler, NULL, 128, osPriorityNormal);
-      //err = 1;
   }
   return err;
 }
@@ -141,11 +134,9 @@ void net_http_server_thread(void * argument)
     vTaskDelete(NULL);
 
   /** Create WebSocket thread*/
-  // sys_thread_new("websocket", ws_server_thread, 
-  //                 (void*)&web->ws, 1024, osPriorityNormal);
+  sys_thread_new("websocket", ws_server_thread, (void*)&web->ws, 1024, osPriorityNormal);
 
-  // sys_thread_new("httpsend", http_send_task, 
-  //               NULL, 128, osPriorityNormal);
+  // sys_thread_new("httpsend", http_send_task, NULL, 128, osPriorityNormal);
   
   /* Put the connection into LISTEN state */
   netconn_listen(conn);
@@ -176,51 +167,6 @@ void net_http_server_thread(void * argument)
     }
   }
 }
-
-
-
-// struct http_send
-// {
-//   struct netconn *conn;
-//   uint32_t len;
-//   unsigned char* data;
-//   QueueHandle_t *queue;
-// };
-
-// QueueHandle_t httpSendQueue;
-
-// static int8_t http_send_response(struct netconn *conn, unsigned char *data, uint32_t len)
-// {
-//   int8_t resp = 1;
-//   QueueHandle_t queue = xQueueCreate(1, sizeof(int8_t));
-//   struct http_send http_send = {
-//     .conn = conn,
-//     .data = data,
-//     .len = len,
-//     .queue = &queue
-//   };
-//   xQueueSend(httpSendQueue, &http_send, 0);
-//   if (xQueueReceive(queue, &resp, pdMS_TO_TICKS(300)) == pdTRUE)
-//     resp = 0;
-//   vQueueDelete(queue);
-//   return resp;
-// }
-
-// static void http_send_task(void *arg)
-// {
-//   httpSendQueue = xQueueCreate( 5, sizeof(struct http_send));
-//   struct http_send send;
-//   int8_t res = 0;
-
-//   for(;;)
-//   {
-//     xQueueReceive(httpSendQueue, &send, portMAX_DELAY);
-//     netconn_write(send.conn, send.data, send.len, NETCONN_NOCOPY);
-//     osDelay(70);
-//     xQueueSend(*send.queue, &res, 0);
-//   }
-// }
-
 
 /**
  * [http_receive_handle description]
@@ -378,7 +324,7 @@ static void http_receive_handler(void * argument)
 static void ws_server_thread(void * argument)
 {
   struct websocket *ws = (struct websocket*)argument;
-  struct netconn *ws_con, *accept_sock;
+  struct netconn *ws_con;
   struct netbuf *inbuf = NULL;
   char* pInbuf = NULL;
   uint16_t size_inbuf = 0;
@@ -397,17 +343,17 @@ static void ws_server_thread(void * argument)
 
   for(;;)
   {
-    if (netconn_accept(ws_con, &accept_sock) == ERR_OK)
+    if (netconn_accept(ws_con, &ws->accepted_sock) == ERR_OK)
     {
       /** 
        * Create a task for sending messages to client
        * Accepted socket is the argument for a task function
        */
-      //xTaskCreate(ws_send_thread, "send_thread", 255, 
-      //  (void*)accept_sock, osPriorityNormal, &SendTaskHandle);
+      xTaskCreate(ws_send_thread, "send_thread", 255, 
+       (void*)ws, osPriorityNormal, &SendTaskHandle);
 
       /** Receive incomming messages */
-      while (netconn_recv(accept_sock, &inbuf) == ERR_OK)
+      while (netconn_recv(ws->accepted_sock, &inbuf) == ERR_OK)
       {
         netbuf_data(inbuf, (void**)&pInbuf, &size_inbuf);
         if (strncmp(pInbuf, "GET /", 5) == 0)
@@ -422,19 +368,37 @@ static void ws_server_thread(void * argument)
           mbedtls_base64_encode((unsigned char*)ws->hash_base64, 100, 
                                 (size_t*)&len, (unsigned char*)ws->hash, 20);
           /** Send response handshake */
-          sprintf(ws->send_buf, "%s%s", head_ws, ws->hash_base64);
-          netconn_write(accept_sock, ws->send_buf, 
-                        strlen(ws->send_buf), NETCONN_NOCOPY);
+          sprintf((char*)ws->send_buf, "%s%s%s", head_ws, ws->hash_base64, "\r\n\r\n");
+          netconn_write(ws->accepted_sock, ws->send_buf, strlen((char*)ws->send_buf), NETCONN_NOCOPY);
+          ws->established = 1;
         }
 
         netbuf_delete(inbuf);
       }
-      netconn_close(accept_sock);
-      netconn_delete(accept_sock);
+      ws->established = 0;
+      netconn_close(ws->accepted_sock);
+      netconn_delete(ws->accepted_sock);
       /** Delete tcp send thread */
-      //vTaskDelete(SendTaskHandle);
+      vTaskDelete(SendTaskHandle);
     }
   }
+}
+
+
+
+
+/**
+ * [netws_send_string_message description]
+ * @param msg [description]
+ */
+void netws_send_message(uint8_t *msg, uint32_t len, ws_msg_type type)
+{
+  ws_msg msg_struct = {
+    .type = type,
+    .msg = msg,
+    .len = len
+  };
+  xQueueSend(wsSendQueue, (void*)&msg_struct, 0);
 }
 
 /**
@@ -443,32 +407,30 @@ static void ws_server_thread(void * argument)
  */
 static void ws_send_thread(void * argument)
 {
-  struct netconn *ws_con = (struct netconn*)argument;
-  uint8_t recv_struct;
-  wsSendQueue = xQueueCreate( 5, sizeof( uint8_t /* temp size */ ));
+  struct websocket *ws = (struct websocket*)argument;
+  ws_msg msg;
+  wsSendQueue = xQueueCreate( 5, sizeof(ws_msg) );
   if (wsSendQueue == NULL)
     vTaskDelete(NULL);
 
   for (;;)
   {
-    xQueueReceive( wsSendQueue, &( recv_struct /* temp var (not compile) */ ), portMAX_DELAY);
-    // netconn_write(accept_sock, ws->send_buf, strlen(ws->send_buf), NETCONN_NOCOPY);
+    xQueueReceive( wsSendQueue, &( msg ), portMAX_DELAY);
+    
+    if (ws->established == 1)
+    {
+      memset(ws->send_buf, 0x00, 1024);
+      ws->send_buf[0] = (msg.type == WS_STRING) ? 0x81 : 0x82;
+      uint8_t byte_cnt = ws_create_binary_len(msg.len, ws->send_buf+1);
+      memcpy(ws->send_buf+byte_cnt+1, msg.msg, msg.len);
+      msg.len = msg.len + byte_cnt + 1;
+
+      netconn_write(ws->accepted_sock, ws->send_buf, msg.len, NETCONN_NOCOPY);
+    }
   }
 }
 
-/**
- * [netws_send_string_message description]
- * @param msg [description]
- */
-void netws_send_string_message(char *msg, uint32_t len)
-{
-  /**
-   * len
-   * max len check
-   * msg
-   */
-  // xQueueSend(wsSendQueue, ())
-}
+
 
 static uint8_t get_binary_pack_len(uint8_t *buf)
 {
@@ -485,7 +447,7 @@ static uint8_t get_binary_pack_len(uint8_t *buf)
 static uint8_t ws_create_binary_len(uint32_t len, uint8_t *outbuf)
 {
   uint8_t tmp_byte = 0, bytecnt = 0;
-  for (uint8_t iByte = 4; iByte >= 0; --iByte)
+  for (int iByte = 4; iByte >= 0; iByte--)
   {
     tmp_byte = ( len >> (7 * iByte)) & 0x7F;
     if (tmp_byte != 0)

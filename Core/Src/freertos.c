@@ -132,7 +132,7 @@ void thread_MainTask(void const * argument)
   MX_LWIP_Init();
   HAL_Delay(3000);
   /** Get a cont files of website and make site catalogue */
-  //if (net_create_filesystem(&webworker.wsfs) == 0)
+  if (net_create_filesystem(&webworker.wsfs) == 0)
   {
     /** Create new token and start http server */
     uint32_t new_token = 123456;
@@ -140,9 +140,22 @@ void thread_MainTask(void const * argument)
     sprintf(webworker.token, "%x", new_token);
     sys_thread_new("HTTP", net_http_server_thread, (void*)&webworker, 1024, osPriorityNormal);
   }
+  char msg[32] = "hello from stm";
+  uint8_t binary_msg[32] = {0};
+  for (int i = 0; i < 32; ++i)
+    binary_msg[i] = i;
   /* Infinite loop */
   for(;;)
   {
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1)
+    {
+      //osDelay(200);
+      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1)
+      {
+        //netws_send_message((uint8_t*)msg, strlen(msg), WS_STRING);
+        netws_send_message(binary_msg, 32, WS_BINARY);
+      }
+    }
     osDelay(100);
     //vTaskSuspend(NULL);
   }
