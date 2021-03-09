@@ -33,14 +33,15 @@ static void http_send_task(void *arg);
 
 
 /**
- * [net_create_filesystem description]
- * @param  wsfs [description]
- * @return      [description]
+ * The function of creating a file structure of the site
+ * @param  wsfs web site structure (refer to <net.h>)
+ * @return      0 - errors none
+ *              1 - http file system not created
  */
 uint8_t net_create_filesystem(struct website_file_system *wsfs)
 {
   uint8_t err = 1;
-  /** Get a cont files of website and make site catalogue */
+  /** Get a count files of website and make site catalogue */
   memcpy(&wsfs->files_cnt, (uint8_t*)wsfs->flash_addr, sizeof(uint32_t));
   if ( (wsfs->files_cnt > 0) && (wsfs->files_cnt < 0xFFFFFFFF))
   {
@@ -57,6 +58,7 @@ uint8_t net_create_filesystem(struct website_file_system *wsfs)
 
 /**
  * [net_create_receive_threads description]
+ * 
  * @return  0 - Errors none
  *          1 - xTaskCreate fail
  *          2 - xQueueCreate fail
@@ -75,10 +77,16 @@ static uint8_t net_create_receive_threads(void)
 }
 
 /**
- * [cmp_cookie_token description]
- * @param  pBuffer [description]
- * @param  token   [description]
- * @return         [description]
+ * Function for comparing the "token" parameter in the Cookie field.
+ * When creating an http stream, a random number is generated. 
+ * The unauthorized client does not know it and 
+ * therefore will be redirected to the authorization page. 
+ * After authorization, the "token" parameter will appear in the Cookie field.
+ * 
+ * @param  pBuffer Pointer to array of request header
+ * @param  token   Token generated on the server side
+ * @return         0 - User is not logged in
+ *                 1 - Success login
  */
 static uint8_t cmp_cookie_token(char *pBuffer, char *token)
 {
@@ -110,15 +118,19 @@ static uint8_t cmp_cookie_token(char *pBuffer, char *token)
 }
 
 /**
- * [http_server_netconn_thread description]
- * @param argument [description]
+ * Function of starting an http server and receiving incoming connections.
+ * After starting listening on the port, it starts checking for free threads 
+ * that can accept an incoming connection. 
+ * When the stream of receiving messages is free, 
+ * the structure of the received connection is passed to it.
+ * 
+ * @param argument webworker structure (refer net.h)
  */
 void net_http_server_thread(void * argument)
 { 
   struct netconn *conn;
   struct webworker *web = (struct webworker*)argument;
   err_t err;
-
 
   /* Create a new TCP connection handle */
   conn = netconn_new(NETCONN_TCP);
@@ -135,9 +147,6 @@ void net_http_server_thread(void * argument)
 
   /** Create WebSocket thread*/
   sys_thread_new("websocket", ws_server_thread, (void*)&web->ws, 1024, osPriorityNormal);
-
-  // sys_thread_new("httpsend", http_send_task, NULL, 128, osPriorityNormal);
-  
   /* Put the connection into LISTEN state */
   netconn_listen(conn);
 
@@ -169,9 +178,9 @@ void net_http_server_thread(void * argument)
 }
 
 /**
- * [http_receive_handle description]
- * @param web  [description]
- * @param conn [description]
+ * [http_receive_handler description]
+ * 
+ * @param argument [description]
  */
 static void http_receive_handler(void * argument)
 {
