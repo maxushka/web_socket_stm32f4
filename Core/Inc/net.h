@@ -9,7 +9,10 @@
 #include <stdbool.h>
 
 #define NET_HTTP_MAX_CONNECTIONS   2
+#define NET_REQDATA_BUFF_SIZE      1024
 
+#define WS_ID_STRING               0x81
+#define WS_ID_BINARY               0x82
 
 typedef enum
 {
@@ -32,6 +35,8 @@ struct websocket
   char hash[512];
   char hash_base64[512];
   uint8_t send_buf[1024];
+  void (*string_callback)(uint8_t *data, uint32_t len);
+  void (*binary_callback)(uint8_t *data, uint32_t len);
   uint8_t established;
 };
 
@@ -65,22 +70,22 @@ typedef struct
 {
   struct netconn *netconn;
   struct webworker *web;
-  char request_data[1024];
+  char request_data[NET_REQDATA_BUFF_SIZE];
   char request_url[32];
   char resp_js_buff[32];
   uint8_t isopen;
   uint32_t resp_js_buff_len;
 } net_connection;
 
-struct new_connection
-{
-  struct webworker *web;
-  struct netconn *netconn;
-  char request_data[1024];
-  char request_url[32];
-  char resp_js_buff[32];
-  uint32_t resp_js_buff_len;
-};
+// struct new_connection
+// {
+//   struct webworker *web;
+//   struct netconn *netconn;
+//   char request_data[NET_REQDATA_BUFF_SIZE];
+//   char request_url[32];
+//   char resp_js_buff[32];
+//   uint32_t resp_js_buff_len;
+// };
 
 
 

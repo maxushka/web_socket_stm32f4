@@ -27,6 +27,7 @@ static void ws_server_thread(void * argument);
 static uint8_t get_ws_key(char *buf, char *key);
 static void ws_send_thread(void * argument);
 static uint8_t ws_create_binary_len(uint32_t len, uint8_t *outbuf);
+static uint32_t ws_get_binary_pack_len(uint8_t *buf, uint8_t *pPayload);
 static int8_t http_send_response(struct netconn *conn, unsigned char *data, uint32_t len);
 static void http_send_task(void *arg);
 
@@ -188,7 +189,6 @@ static void http_receive_handler(void * argument)
   struct netbuf *inbuf = NULL;
   char* pBuffer = NULL;
   uint16_t buflen = 0;
-
   uint8_t isAuth = 0;
 
   for(;;)
@@ -206,7 +206,9 @@ static void http_receive_handler(void * argument)
       {
         /** Copy request body */
         /** TODO: check request_data length buffer and buflen */
-        strncpy(net->request_data, pBuffer+strlen("GET "), buflen);
+        memset(net->request_data, 0x00, NET_REQDATA_BUFF_SIZE)
+        uint8_t get_offset = strlen("GET ");
+        strncpy(net->request_data, pBuffer+get_offset, buflen-get_offset);
         /** Get the page name */
         char *pPage = strtok((char*)net->request_data, " ");
         if (pPage)
@@ -238,7 +240,6 @@ static void http_receive_handler(void * argument)
               /** Returning the contents of the requested file */
               netconn_write(net->netconn, (unsigned char*)net->web->wsfs.flash_addr+net->web->wsfs.files[iFile].offset, 
                            net->web->wsfs.files[iFile].page_size, NETCONN_NOCOPY);
-              // http_send_response(net->netconn, (unsigned char*)net->web->wsfs.flash_addr+net->web->wsfs.files[iFile].offset, net->web->wsfs.files[iFile].page_size);
               osDelay(10);
               break;
             }
@@ -258,63 +259,63 @@ static void http_receive_handler(void * argument)
         }
       }
 
-//      /** Если это POST-запрос */
-//      else if( (strncmp(pBuffer, "POST /", 6) == 0) )
-//      {
-//        for (int i = 0; i < 2048; i++)
-//          tmp_post[i] = 0;
-//        memcpy((char*)tmp_post, pBuffer, buflen);
+      /** Если это POST-запрос */
+     //  else if( (strncmp(pBuffer, "POST /", 6) == 0) )
+     //  {
+     //    memset(net->request_data, 0x00, NET_REQDATA_BUFF_SIZE)
+     //    uint8_t post_offset = strlen("POST ");
+     //    strncpy(net->request_data, pBuffer+post_offset, buflen-post_offset);
 
-//        struct netbuf *in;
-//        strcpy((char*)data, pBuffer+strlen("POST /"));
-//        char *url = strtok((char*)data, " ");
-//        /** Ищем указатель на входящую JSON-строку */
-//        char *pContLen = strstr((char*)tmp_post, "Content-Length: ");
-//        pContLen = pContLen+strlen("Content-Length: ");
-//        json_input_size = strchr(pContLen, ' ') - pContLen;
-//        char __IO *ContentLenArr = (char __IO*)(0xC050F000);//pvPortMalloc(4);
-//        memset((char*)ContentLenArr, 0x00, 4);
-//        //if (ContentLenArr != NULL)
-//        {
-//          memcpy((char*)ContentLenArr, pContLen, json_input_size);
-//          json_input_size = atoi((char*)ContentLenArr);
-//        }
-//        //else
-//          //json_input_size = 0;
-//        printf("json_input_size: %d\n", json_input_size);
-//        char *pContent = strstr((char*)tmp_post, "{\"json\":");
-//        /** Вычитываем всю полезную нагрузку в массив <tmp_post> */
-//        //if (strlen(pContent) < json_input_size)
-//        {
-//          while (strlen(pContent) < json_input_size)//do
-//          {
-//            err_t res = netconn_recv(net->netconn, &in);
-//            netbuf_data(in, (void**)&pBuffer, &buflen);
-//            strncat((char*)tmp_post, pBuffer, buflen);
-//            netbuf_delete(in);
-//            pContent = strstr((char*)tmp_post, "{\"json\":");
-//          } 
-//        }
-//        /** Вызываем обработчик POST-запроса и передаем ему URL и JSON-строку */
-//        char *response = web->postHandler(url, pContent+strlen("{\"json\":"), web);
-//        /** Если postHandler возвращает указатель на данные */
-//        if (response != NULL)
-//        {
-//          /** То совмещаем их с заголовком и возвращаем клиенту */
-//          memset((char*)tmp_post, 0x00, 2048);
-//          strcat((char*)tmp_post, head_ok_resp);
-//          strcat((char*)tmp_post, response);
-//          size_t size_send = strlen((char*)tmp_post);
-//          netconn_write(net->netconn, (const unsigned char*)(tmp_post), size_send, NETCONN_NOCOPY);
-//          printf("return post netcon\n");
-//          osDelay(10);
-//        }
-//        /** Иначе отправляем просто заголовок OK */
-//        else
-//        {
-//          netconn_write(net->netconn, (const unsigned char*)(head_ok_resp), (size_t)strlen(head_ok_resp), NETCONN_COPY);
-//        }
-//      }
+     //   // struct netbuf *in;
+     //   // strcpy((char*)data, );
+     //   char *url = strtok((char*)net->request_data, " ");
+     //   /** Ищем указатель на входящую JSON-строку */
+     //   char *pContLen = strstr((char*)net->request_data, "Content-Length: ");
+     //   pContLen = pContLen+strlen("Content-Length: ");
+     //   json_input_size = strchr(pContLen, ' ') - pContLen;
+     //   char __IO *ContentLenArr = (char __IO*)(0xC050F000);//pvPortMalloc(4);
+     //   memset((char*)ContentLenArr, 0x00, 4);
+     //   //if (ContentLenArr != NULL)
+     //   {
+     //     memcpy((char*)ContentLenArr, pContLen, json_input_size);
+     //     json_input_size = atoi((char*)ContentLenArr);
+     //   }
+     //   //else
+     //     //json_input_size = 0;
+     //   printf("json_input_size: %d\n", json_input_size);
+     //   char *pContent = strstr((char*)tmp_post, "{\"json\":");
+     //   /** Вычитываем всю полезную нагрузку в массив <tmp_post> */
+     //   //if (strlen(pContent) < json_input_size)
+     //   {
+     //     while (strlen(pContent) < json_input_size)//do
+     //     {
+     //       err_t res = netconn_recv(net->netconn, &in);
+     //       netbuf_data(in, (void**)&pBuffer, &buflen);
+     //       strncat((char*)tmp_post, pBuffer, buflen);
+     //       netbuf_delete(in);
+     //       pContent = strstr((char*)tmp_post, "{\"json\":");
+     //     } 
+     //   }
+     //   /** Вызываем обработчик POST-запроса и передаем ему URL и JSON-строку */
+     //   char *response = web->postHandler(url, pContent+strlen("{\"json\":"), web);
+     //   /** Если postHandler возвращает указатель на данные */
+     //   if (response != NULL)
+     //   {
+     //     /** То совмещаем их с заголовком и возвращаем клиенту */
+     //     memset((char*)tmp_post, 0x00, 2048);
+     //     strcat((char*)tmp_post, head_ok_resp);
+     //     strcat((char*)tmp_post, response);
+     //     size_t size_send = strlen((char*)tmp_post);
+     //     netconn_write(net->netconn, (const unsigned char*)(tmp_post), size_send, NETCONN_NOCOPY);
+     //     printf("return post netcon\n");
+     //     osDelay(10);
+     //   }
+     //   /** Иначе отправляем просто заголовок OK */
+     //   else
+     //   {
+     //     netconn_write(net->netconn, (const unsigned char*)(head_ok_resp), (size_t)strlen(head_ok_resp), NETCONN_COPY);
+     //   }
+     // }
       
     }
     /** Close connection, clear netbuf and connection */
@@ -381,7 +382,20 @@ static void ws_server_thread(void * argument)
           netconn_write(ws->accepted_sock, ws->send_buf, strlen((char*)ws->send_buf), NETCONN_NOCOPY);
           ws->established = 1;
         }
-
+        else
+        {
+          uint8_t *pPayload;
+          uint32_t len = ws_get_binary_pack_len(pInbuf, pPayload);
+          if (pInbuf[0] == WS_ID_STRING)
+          {
+            // TODO: Place assert everywere
+            ws->string_callback(pPayload, len);
+          }
+          else if (pInbuf[0] == WS_ID_BINARY)
+          {
+            ws->binary_callback(pPayload, len);
+          }
+        }
         netbuf_delete(inbuf);
       }
       ws->established = 0;
@@ -439,11 +453,23 @@ static void ws_send_thread(void * argument)
   }
 }
 
-
-
-static uint8_t get_binary_pack_len(uint8_t *buf)
+/**
+ * [ws_get_binary_pack_len description]
+ * @param  buf      [description]
+ * @param  pPayload [description]
+ * @return          [description]
+ */
+static uint32_t ws_get_binary_pack_len(uint8_t *buf, uint8_t *pPayload)
 {
-
+  uint8_t iByte = 1;
+  uint32_t len = 0;
+  while ( (buf[iByte] & 0x80) == 0x80 )
+  {
+    len |= (buf[iByte] << (7 * iByte) ) & 0x7F;
+    ++iByte;
+  }
+  pPayload = &buf[iByte];
+  return len;
 }
 
 /**
