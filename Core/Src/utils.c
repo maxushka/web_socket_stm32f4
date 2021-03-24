@@ -1,5 +1,4 @@
 #include "utils.h"
-#include <string.h>
 
 /*
  * Name  : CRC-8
@@ -12,7 +11,7 @@
     одинарных, двойных, тройных и всех нечетных ошибок
 */
 
-const unsigned char Crc8Table[256] = {
+const uint8_t Crc8Table[256] = {
     0x00, 0x31, 0x62, 0x53, 0xC4, 0xF5, 0xA6, 0x97,
     0xB9, 0x88, 0xDB, 0xEA, 0x7D, 0x4C, 0x1F, 0x2E,
     0x43, 0x72, 0x21, 0x10, 0x87, 0xB6, 0xE5, 0xD4,
@@ -57,7 +56,7 @@ const unsigned char Crc8Table[256] = {
  * MaxLen: 4095 байт (32767 бит) - обнаружение
     одинарных, двойных, тройных и всех нечетных ошибок
 */
-const unsigned short Crc16Table[256] = {
+const uint16_t Crc16Table[256] = {
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
     0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
     0x1231, 0x0210, 0x3273, 0x2252, 0x52B5, 0x4294, 0x72F7, 0x62D6,
@@ -92,43 +91,55 @@ const unsigned short Crc16Table[256] = {
     0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0
 };
 
-unsigned short Utils_crc16(unsigned char * pcBlock, unsigned short len)
+/**
+ * [Utils_crc16 description]
+ * @param  pcBlock [description]
+ * @param  len     [description]
+ * @return         [description]
+ */
+uint16_t Utils_crc16(uint8_t *pcBlock, uint32_t len)
 {
-	unsigned short crc = 0xFFFF;
-	while (len--)
-		crc = (crc << 8) ^ Crc16Table[(crc >> 8) ^ *pcBlock++];
-	return crc;
+  uint16_t crc = 0xFFFF;
+  while (len--)
+    crc = (crc << 8) ^ Crc16Table[(crc >> 8) ^ *pcBlock++];
+  return crc;
 }
 
-unsigned char Utils_crc8(unsigned char *pcBlock, uint32_t len)
+/**
+ * [Utils_crc8 description]
+ * @param  pcBlock [description]
+ * @param  len     [description]
+ * @return         [description]
+ */
+uint8_t Utils_crc8(uint8_t *pcBlock, uint32_t len)
 {
-	#pragma push
-  #pragma O0		
-	unsigned char crc = 0xFF;
-	while (len--)
-		crc = Crc8Table[crc ^ *pcBlock++];
-	return crc;
-	#pragma pop
+  uint8_t crc = 0xFF;
+  while (len--)
+    crc = Crc8Table[crc ^ *pcBlock++];
+  return crc;
 }
 
-SysPkg_Typedef Utils_CmdCreate(uint8_t dest, uint8_t source, uint8_t cmd, uint32_t size, 
-							uint8_t* payload, bool compress, uint8_t misc, uint8_t pack_cnt)
+/**
+ * [Utils_CmdCreate description]
+ * @param pkg     [description]
+ * @param payload [description]
+ */
+void Utils_CmdCreate( SysPkg_Typedef *pkg, 
+                      uint8_t *payload, uint32_t size )
 {
-	SysPkg_Typedef pkg;
-	
-	pkg.SYNQSEQ = SYNQSEQ_DEF;
-	pkg.cmd = cmd;
-	pkg.src_id = source;
-	pkg.dest_id = dest;
-	pkg.misc = (compress << 7) | (misc & 0x7F);
-	pkg.pack_cnt = pack_cnt;
-	pkg.byte_cnt = size;
+  extern uint8_t SELF_NET_ID;
+  pkg->SYNQSEQ = SYNQSEQ_DEF;
+  pkg->src_id = SELF_NET_ID;
+  pkg->pack_cnt = 0;
+  pkg->byte_cnt = sizeof(SysPkg_Typedef) + size;
 
-	if (payload == NULL)
-		pkg.crc16 = Utils_crc16((unsigned char *)&pkg, sizeof(SysPkg_Typedef)-sizeof(uint32_t));
-	else
-		pkg.crc16 = Utils_crc16(payload, size-sizeof(SysPkg_Typedef));
-	return pkg;
+  if (payload == NULL)
+  {
+    pkg->crc16 = Utils_crc16( (uint8_t*)pkg, (sizeof(SysPkg_Typedef)-sizeof(uint16_t)) );
+  }
+  else
+  {
+    pkg->crc16 = Utils_crc16( (uint8_t*)pkg, (sizeof(SysPkg_Typedef)-sizeof(uint16_t)) );
+    pkg->crc16 += Utils_crc16(payload, (pkg->byte_cnt - sizeof(SysPkg_Typedef)) );
+  }
 }
-
-/*************************** END OF FILE ***************************/

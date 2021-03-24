@@ -76,3 +76,4 @@ web_socket_stm32f4\net.o: ../MBEDTLS/App/mbedtls_config.h
 web_socket_stm32f4\net.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/check_config.h
 web_socket_stm32f4\net.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/sha1.h
 web_socket_stm32f4\net.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/base64.h
+web_socket_stm32f4\net.o: ..\Core\Src\utils.h

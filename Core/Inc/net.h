@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-#define NET_HTTP_MAX_CONNECTIONS   2
+#define NET_HTTP_MAX_CONNECTIONS   3
 #define NET_REQDATA_BUFF_SIZE      1024
 
 #define WS_ID_STRING               0x81
@@ -22,22 +22,32 @@ typedef enum
 
 typedef struct
 {
+  uint16_t cmd;
   ws_msg_type type;
-  uint8_t *msg;
+  uint8_t msg[512];
   uint32_t len;
 } ws_msg;
 
-struct websocket
+struct ws_client
 {
   struct netconn *accepted_sock;
   char key[32];
   char concat_key[128];
   char hash[512];
   char hash_base64[512];
+  uint8_t mask[4];
+  uint8_t recv_buf[512];
+  uint8_t established;
+  void *parent;
+};
+
+struct ws_server
+{
+  struct ws_client ws_client[2];
+  uint8_t connected_clients;
   uint8_t send_buf[1024];
   void (*string_callback)(uint8_t *data, uint32_t len);
   void (*binary_callback)(uint8_t *data, uint32_t len);
-  uint8_t established;
 };
 
 struct website_file
@@ -61,7 +71,7 @@ struct webworker
   uint8_t auth;
   char token[32];
   char crnt_user[32];
-  struct websocket ws;
+  struct ws_server ws;
   char *(*getHandler) (char *params);
   char *(*postHandler) (char* url, char *json, struct webworker *web);
 };
@@ -91,6 +101,9 @@ typedef struct
 
 uint8_t net_create_filesystem(struct website_file_system *wsfs);
 void net_http_server_thread(void * argument);
-void netws_send_message(uint8_t *msg, uint32_t len, ws_msg_type type);
+void netws_send_message(uint16_t cmd, uint8_t *msg, uint32_t len, ws_msg_type type);
+
+void ws_binary_callback (uint8_t *data, uint32_t len);
+void ws_string_callback (uint8_t *data, uint32_t len);
 
 #endif

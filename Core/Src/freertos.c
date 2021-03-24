@@ -119,6 +119,29 @@ void MX_FREERTOS_Init(void) {
 
 }
 
+
+struct device_status
+{
+  uint8_t irp[4];
+  uint8_t afu[4];
+  uint8_t lit_en[4];
+
+  uint8_t emit;
+  uint8_t mode;
+  uint8_t submode;
+  uint8_t mode_vz;
+};
+  struct device_status bmsg = {
+     .irp = {1,1,1,1},
+     .afu = {1,1,1,1},
+     .lit_en = {1,1,1,1},
+     .emit = 0,
+     .mode = 1,
+     .submode = 5,
+     .mode_vz = 12
+  };
+
+
 /* USER CODE BEGIN Header_thread_MainTask */
 /**
   * @brief  Function implementing the MainTask thread.
@@ -140,10 +163,6 @@ void thread_MainTask(void const * argument)
     sprintf(webworker.token, "%x", new_token);
     sys_thread_new("HTTP", net_http_server_thread, (void*)&webworker, 1024, osPriorityNormal);
   }
-  char msg[32] = "hello from stm";
-  uint8_t binary_msg[32] = {0};
-  for (int i = 0; i < 32; ++i)
-    binary_msg[i] = i;
   /* Infinite loop */
   for(;;)
   {
@@ -153,7 +172,7 @@ void thread_MainTask(void const * argument)
       if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1)
       {
         //netws_send_message((uint8_t*)msg, strlen(msg), WS_STRING);
-        netws_send_message(binary_msg, 32, WS_BINARY);
+        netws_send_message(0x1, (uint8_t*)&bmsg, sizeof(struct device_status), WS_BINARY);
       }
     }
     osDelay(100);

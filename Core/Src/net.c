@@ -2,6 +2,9 @@
 #include "mbedtls.h"
 #include "mbedtls/sha1.h"
 #include "mbedtls/base64.h"
+#include "utils.h"
+
+extern uint8_t SELF_NET_ID;
 
 char *head_js_resp = "HTTP/1.1 200 OK\n\
                       Connection: close\n\
@@ -27,11 +30,11 @@ static void ws_server_thread(void * argument);
 static uint8_t get_ws_key(char *buf, char *key);
 static void ws_send_thread(void * argument);
 static uint8_t ws_create_binary_len(uint32_t len, uint8_t *outbuf);
-static uint32_t ws_get_binary_pack_len(uint8_t *buf, uint8_t *pPayload);
-static int8_t http_send_response(struct netconn *conn, unsigned char *data, uint32_t len);
-static void http_send_task(void *arg);
+static uint8_t ws_get_binary_pack_len(uint8_t *buf, uint32_t *len, uint8_t **pPayload);
 
 
+static void ws_unmask_input_data(uint8_t *masked_buf, uint32_t size, uint8_t *mask, uint8_t *out_buf);
+static void ws_client_thread(void * argument);
 
 /**
  * The function of creating a file structure of the site
@@ -147,7 +150,7 @@ void net_http_server_thread(void * argument)
     vTaskDelete(NULL);
 
   /** Create WebSocket thread*/
-  sys_thread_new("websocket", ws_server_thread, (void*)&web->ws, 1024, osPriorityNormal);
+  sys_thread_new("websocket", ws_server_thread, (void*)&web->ws, 512, osPriorityNormal);
   /* Put the connection into LISTEN state */
   netconn_listen(conn);
 
@@ -206,7 +209,7 @@ static void http_receive_handler(void * argument)
       {
         /** Copy request body */
         /** TODO: check request_data length buffer and buflen */
-        memset(net->request_data, 0x00, NET_REQDATA_BUFF_SIZE)
+        memset(net->request_data, 0x00, NET_REQDATA_BUFF_SIZE);
         uint8_t get_offset = strlen("GET ");
         strncpy(net->request_data, pBuffer+get_offset, buflen-get_offset);
         /** Get the page name */
@@ -239,13 +242,13 @@ static void http_receive_handler(void * argument)
               file_not_found = 0;
               /** Returning the contents of the requested file */
               netconn_write(net->netconn, (unsigned char*)net->web->wsfs.flash_addr+net->web->wsfs.files[iFile].offset, 
-                           net->web->wsfs.files[iFile].page_size, NETCONN_NOCOPY);
+                           net->web->wsfs.files[iFile].page_size, NETCONN_COPY);
               osDelay(10);
               break;
             }
           }
           if (file_not_found == 1)
-            netconn_write(net->netconn, head_not_found, strlen(head_not_found), NETCONN_NOCOPY);
+            netconn_write(net->netconn, head_not_found, strlen(head_not_found), NETCONN_COPY);
         }
         /** If this is a custom GET request */
         else
@@ -333,11 +336,8 @@ static void http_receive_handler(void * argument)
  */
 static void ws_server_thread(void * argument)
 {
-  struct websocket *ws = (struct websocket*)argument;
+  struct ws_server *ws = (struct ws_server*)argument;
   struct netconn *ws_con;
-  struct netbuf *inbuf = NULL;
-  char* pInbuf = NULL;
-  uint16_t size_inbuf = 0;
   TaskHandle_t SendTaskHandle;
 
   /* Create a new TCP connection handle */
@@ -351,76 +351,118 @@ static void ws_server_thread(void * argument)
 
   netconn_listen(ws_con);
 
+  /** 
+   * Create a task for sending messages to client
+   * Accepted socket is the argument for a task function
+   */
+  xTaskCreate(ws_send_thread, "send_thread", 255, 
+   (void*)ws, osPriorityNormal, &SendTaskHandle);
+  
+  struct ws_client *new_client;
+
   for(;;)
   {
-    if (netconn_accept(ws_con, &ws->accepted_sock) == ERR_OK)
+    for (int iClient = 0; iClient < 2; ++iClient)
     {
-      /** 
-       * Create a task for sending messages to client
-       * Accepted socket is the argument for a task function
-       */
-      xTaskCreate(ws_send_thread, "send_thread", 255, 
-       (void*)ws, osPriorityNormal, &SendTaskHandle);
-
-      /** Receive incomming messages */
-      while (netconn_recv(ws->accepted_sock, &inbuf) == ERR_OK)
+      new_client = &ws->ws_client[iClient];
+      if (new_client->established == 0)
       {
-        netbuf_data(inbuf, (void**)&pInbuf, &size_inbuf);
-        if (strncmp(pInbuf, "GET /", 5) == 0)
+        if (netconn_accept(ws_con, &new_client->accepted_sock) == ERR_OK)
         {
-          /** Get client Sec-WebSocket-Key */
-          get_ws_key(pInbuf, ws->key);
-          /** Concat with const GUID and make answer*/
-          sprintf(ws->concat_key, "%s%s", ws->key, ws_guid);
-          mbedtls_sha1((unsigned char *)ws->concat_key, 60, 
-                       (unsigned char*)ws->hash);
-          int len = 0;
-          mbedtls_base64_encode((unsigned char*)ws->hash_base64, 100, 
-                                (size_t*)&len, (unsigned char*)ws->hash, 20);
-          /** Send response handshake */
-          sprintf((char*)ws->send_buf, "%s%s%s", head_ws, ws->hash_base64, "\r\n\r\n");
-          netconn_write(ws->accepted_sock, ws->send_buf, strlen((char*)ws->send_buf), NETCONN_NOCOPY);
-          ws->established = 1;
+          new_client->established = 1;
+          ws->connected_clients++;
+          new_client->parent = (void*)ws;
+          sys_thread_new("ws_client", ws_client_thread, (void*)new_client, 128, osPriorityNormal);
         }
-        else
-        {
-          uint8_t *pPayload;
-          uint32_t len = ws_get_binary_pack_len(pInbuf, pPayload);
-          if (pInbuf[0] == WS_ID_STRING)
-          {
-            // TODO: Place assert everywere
-            ws->string_callback(pPayload, len);
-          }
-          else if (pInbuf[0] == WS_ID_BINARY)
-          {
-            ws->binary_callback(pPayload, len);
-          }
-        }
-        netbuf_delete(inbuf);
       }
-      ws->established = 0;
-      netconn_close(ws->accepted_sock);
-      netconn_delete(ws->accepted_sock);
-      /** Delete tcp send thread */
-      vTaskDelete(SendTaskHandle);
+      else
+      {
+        osDelay(100);
+      }
     }
   }
 }
 
 
+static void ws_client_thread(void * argument)
+{
+  struct ws_client *client = (struct ws_client*)argument;
+  struct ws_server *parent = (struct ws_server*)client->parent;
+  struct netbuf *inbuf = NULL;
+  char* pInbuf = NULL;
+  uint16_t size_inbuf = 0;
+
+  for (;;)
+  {
+    /** Receive incomming messages */
+    while (netconn_recv(client->accepted_sock, &inbuf) == ERR_OK)
+    {
+      netbuf_data(inbuf, (void**)&pInbuf, &size_inbuf);
+      if (strncmp(pInbuf, "GET /", 5) == 0)
+      {
+        /** Get client Sec-WebSocket-Key */
+        get_ws_key(pInbuf, client->key);
+        /** Concat with const GUID and make answer*/
+        sprintf(client->concat_key, "%s%s", client->key, ws_guid);
+        mbedtls_sha1((unsigned char *)client->concat_key, 60, 
+                     (unsigned char*)client->hash);
+        int len = 0;
+        mbedtls_base64_encode((unsigned char*)client->hash_base64, 100, 
+                              (size_t*)&len, (unsigned char*)client->hash, 20);
+        /** Send response handshake */
+        sprintf((char*)parent->send_buf, "%s%s%s", head_ws, client->hash_base64, "\r\n\r\n");
+        netconn_write(client->accepted_sock, parent->send_buf, strlen((char*)parent->send_buf), NETCONN_NOCOPY);
+        //client->established = 1;
+      }
+      else
+      {
+        uint8_t *pPayload;
+        uint32_t len = 0;
+        if (ws_get_binary_pack_len((uint8_t*)pInbuf, &len, &pPayload) == 1)
+        {
+          memcpy(client->mask, pPayload, sizeof(uint32_t));
+          pPayload += sizeof(uint32_t);
+          ws_unmask_input_data(pPayload, len, client->mask, client->recv_buf);
+        }
+        else
+        {
+          memcpy(client->recv_buf, pPayload, len);
+        }
+
+        if (pInbuf[0] == (char)WS_ID_STRING)
+        {
+          parent->string_callback(client->recv_buf, len);
+        }
+        else if (pInbuf[0] == (char)WS_ID_BINARY)
+        {
+          parent->binary_callback(client->recv_buf, len);
+        }
+      }
+      netbuf_delete(inbuf);
+    }
+    client->established = 0;
+    parent->connected_clients--;
+    netconn_close(client->accepted_sock);
+    netconn_delete(client->accepted_sock);
+    /** Delete tcp send thread */
+    vTaskDelete(NULL);
+  }
+}
 
 
 /**
  * [netws_send_string_message description]
  * @param msg [description]
  */
-void netws_send_message(uint8_t *msg, uint32_t len, ws_msg_type type)
+void netws_send_message(uint16_t cmd, uint8_t *msg, uint32_t len, ws_msg_type type)
 {
-  ws_msg msg_struct = {
-    .type = type,
-    .msg = msg,
-    .len = len
-  };
+  static ws_msg msg_struct;
+  
+  msg_struct.cmd = cmd;
+  msg_struct.len = len;
+  msg_struct.type = type;
+  memcpy(msg_struct.msg, msg, len);
+
   xQueueSend(wsSendQueue, (void*)&msg_struct, 0);
 }
 
@@ -430,25 +472,45 @@ void netws_send_message(uint8_t *msg, uint32_t len, ws_msg_type type)
  */
 static void ws_send_thread(void * argument)
 {
-  struct websocket *ws = (struct websocket*)argument;
+  struct ws_server *ws = (struct ws_server*)argument;
   ws_msg msg;
+  SysPkg_Typedef pkg = {
+    .misc = 0,
+    .dest_id = 0xAA
+  };
   wsSendQueue = xQueueCreate( 5, sizeof(ws_msg) );
   if (wsSendQueue == NULL)
     vTaskDelete(NULL);
 
+  struct ws_client *client;
+
   for (;;)
   {
-    xQueueReceive( wsSendQueue, &( msg ), portMAX_DELAY);
-    
-    if (ws->established == 1)
+    if (xQueueReceive( wsSendQueue, &( msg ), pdMS_TO_TICKS(100)) == pdTRUE)
     {
       memset(ws->send_buf, 0x00, 1024);
+      
       ws->send_buf[0] = (msg.type == WS_STRING) ? 0x81 : 0x82;
-      uint8_t byte_cnt = ws_create_binary_len(msg.len, ws->send_buf+1);
-      memcpy(ws->send_buf+byte_cnt+1, msg.msg, msg.len);
-      msg.len = msg.len + byte_cnt + 1;
+      uint8_t byte_cnt = ws_create_binary_len(msg.len+sizeof(SysPkg_Typedef), ws->send_buf+1);
+      
+      pkg.cmd = msg.cmd;
+      Utils_CmdCreate(&pkg, msg.msg, msg.len);
+      
+      uint8_t *pWriteBuf = ws->send_buf+byte_cnt+1;
+      memcpy(pWriteBuf, (uint8_t*)&pkg, msg.len);
+      pWriteBuf += sizeof(SysPkg_Typedef);
+      memcpy(pWriteBuf, msg.msg, msg.len);
 
-      netconn_write(ws->accepted_sock, ws->send_buf, msg.len, NETCONN_NOCOPY);
+      msg.len = msg.len + byte_cnt + 1 + sizeof(SysPkg_Typedef);
+
+      for (int iClient = 0; iClient < ws->connected_clients; ++iClient)
+      {
+        client = &ws->ws_client[iClient];
+        if (client->established == 1)
+        {
+          netconn_write(client->accepted_sock, ws->send_buf, msg.len, NETCONN_NOCOPY);
+        }
+      }
     }
   }
 }
@@ -459,17 +521,26 @@ static void ws_send_thread(void * argument)
  * @param  pPayload [description]
  * @return          [description]
  */
-static uint32_t ws_get_binary_pack_len(uint8_t *buf, uint8_t *pPayload)
+static uint8_t ws_get_binary_pack_len(uint8_t *buf, uint32_t *len, uint8_t **pPayload)
 {
-  uint8_t iByte = 1;
-  uint32_t len = 0;
-  while ( (buf[iByte] & 0x80) == 0x80 )
+  uint8_t index_data = 2;
+  uint8_t masked_flag = 0;
+
+  if ( (buf[1] & 0x80) == 0x80 )
+    masked_flag = 1;
+
+  if ( (buf[1] & 0x7F) == 126)
   {
-    len |= (buf[iByte] << (7 * iByte) ) & 0x7F;
-    ++iByte;
+    index_data = 4;
+    *len = buf[2] | buf[3];
   }
-  pPayload = &buf[iByte];
-  return len;
+  else
+  {
+    *len = buf[1] & 0x7F;
+  }
+
+  *pPayload = &buf[index_data];
+  return masked_flag;
 }
 
 /**
@@ -482,17 +553,42 @@ static uint32_t ws_get_binary_pack_len(uint8_t *buf, uint8_t *pPayload)
 static uint8_t ws_create_binary_len(uint32_t len, uint8_t *outbuf)
 {
   uint8_t tmp_byte = 0, bytecnt = 0;
-  for (int iByte = 4; iByte >= 0; iByte--)
+  
+  if (len < 126)
   {
-    tmp_byte = ( len >> (7 * iByte)) & 0x7F;
-    if (tmp_byte != 0)
-    {
-      tmp_byte = (iByte != 0) ? (tmp_byte | 0x80) : tmp_byte;
-      outbuf[bytecnt] = tmp_byte;
-      bytecnt++;
-    }
+    outbuf[bytecnt] = len;
+    bytecnt++;
   }
+  else
+  {
+    outbuf[bytecnt] = 126;
+    bytecnt++;
+    outbuf[bytecnt] = ( ( ((uint16_t)len) >> 8) & 0xFF );
+    bytecnt++;
+    outbuf[bytecnt] = ( ( (uint16_t)len) & 0xFF );
+    bytecnt++;
+  }
+  
   return bytecnt;
+}
+
+
+/**
+ * [unmaskInputData description]
+ * @param masked_buf [description]
+ * @param size       [description]
+ * @param mask       [description]
+ * @param out_buf    [description]
+ */
+static void ws_unmask_input_data(uint8_t *masked_buf, 
+                               uint32_t size, 
+                               uint8_t *mask, 
+                               uint8_t *out_buf)
+{
+  for (int i = 0; i < size; ++i)
+  {
+    out_buf[i] = mask[(i%4)]^masked_buf[i];
+  }
 }
 
 /**
@@ -515,5 +611,28 @@ static uint8_t get_ws_key(char *buf, char *key)
   return err;
 }
 
+void ws_string_callback (uint8_t *data, uint32_t len)
+{
+  
+}
+
+
+struct device_status1
+{
+  uint8_t irp[4];
+  uint8_t afu[4];
+  uint8_t lit_en[4];
+
+  uint8_t emit;
+  uint8_t mode;
+  uint8_t submode;
+  uint8_t mode_vz;
+};
+struct device_status1 recv_dev_status;
+
+void ws_binary_callback (uint8_t *data, uint32_t len)
+{
+  memcpy(&recv_dev_status, data, len);
+}
 
 /*************************** END OF FILE ***************************/
