@@ -26,7 +26,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "net.h"
+#include "http.h"
+#include "websocket.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -119,29 +120,6 @@ void MX_FREERTOS_Init(void) {
 
 }
 
-
-struct device_status
-{
-  uint8_t irp[4];
-  uint8_t afu[4];
-  uint8_t lit_en[4];
-
-  uint8_t emit;
-  uint8_t mode;
-  uint8_t submode;
-  uint8_t mode_vz;
-};
-  struct device_status bmsg = {
-     .irp = {1,1,1,1},
-     .afu = {1,1,1,1},
-     .lit_en = {1,1,1,1},
-     .emit = 0,
-     .mode = 1,
-     .submode = 5,
-     .mode_vz = 12
-  };
-
-
 /* USER CODE BEGIN Header_thread_MainTask */
 /**
   * @brief  Function implementing the MainTask thread.
@@ -153,30 +131,21 @@ void thread_MainTask(void const * argument)
 {
   /* USER CODE BEGIN thread_MainTask */
   MX_LWIP_Init();
-  HAL_Delay(3000);
   /** Get a cont files of website and make site catalogue */
-  if (net_create_filesystem(&webworker.wsfs) == 0)
+  if (http_create_filesystem(&webworker.wsfs) == 0)
   {
     /** Create new token and start http server */
-    uint32_t new_token = 123456;
-    //HAL_RNG_GenerateRandomNumber(&hrng, &new_token);
+    uint32_t new_token = 0;
+    HAL_RNG_GenerateRandomNumber(&hrng, &new_token);
     sprintf(webworker.token, "%x", new_token);
-    sys_thread_new("HTTP", net_http_server_thread, (void*)&webworker, 1024, osPriorityNormal);
+    sys_thread_new("HTTP", http_server_task, (void*)&webworker, 1024, osPriorityNormal);
   }
+  sys_thread_new("WS", ws_server_task, (void*)&webworker, 1024, osPriorityNormal);
+
   /* Infinite loop */
   for(;;)
   {
-    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1)
-    {
-      //osDelay(200);
-      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1)
-      {
-        //netws_send_message((uint8_t*)msg, strlen(msg), WS_STRING);
-        netws_send_message(0x1, (uint8_t*)&bmsg, sizeof(struct device_status), WS_BINARY);
-      }
-    }
     osDelay(100);
-    //vTaskSuspend(NULL);
   }
   /* USER CODE END thread_MainTask */
 }

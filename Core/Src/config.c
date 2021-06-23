@@ -1,7 +1,8 @@
 #include "main.h"
-#include "net.h"
+#include "http.h"
+#include "http_handlers.h"
 
-uint8_t SELF_NET_ID = 0xF0;
+// uint8_t SELF_NET_ID = 0xF0;
 
 struct webworker webworker = {
   .wsfs = {
@@ -9,9 +10,7 @@ struct webworker webworker = {
     .files_cnt = 0,
     .files = NULL
   },
-  .ws = {
-    .string_callback = ws_string_callback,
-    .binary_callback = ws_binary_callback
-  }
+  .getHandler = GET_Handler,
+  .postHandler = POST_Handler
 };
 

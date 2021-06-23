@@ -1,55 +1,32 @@
 #include "http_handlers.h"
-#include "config.h"
 #include "jsonlib.h"
-#include "quadspi.h"
+#include "structs.h"
 #include "utils.h"
-#include "cmsis_os.h"
-#include "jamm_structs.h"
-#include "manage.h"
-#include "fdcan.h"
+#include "vz.h"
 #include "net_can.h"
 
+extern struct   litera_store letters_store[MAX_VZ_CNT];
+extern uint8_t  letters_cnt;
+extern xSemaphoreHandle mtx_BlockStateRequest;
 
-#define SIZE_JSON_DUMP    4096
+__IO char *tmp_get_var =  (__IO char*)(NET_TEMP_GET_HANDL_START_ADDR);
+__IO char *tmp_post_var = (__IO char*)(NET_TEMP_POST_HANDL_START_ADDR);
 
-/** Variables */
-char __IO *json_dump = (char __IO*)(SDRAM_JSON_DUMP_ADDRESS);
-char __IO *json_banks_obj = (char __IO*)(SDRAM_BANKS_ADDRESS);
+struct fpga_cmd_amp vFpgaGetAmp = {0};
+extern xSemaphoreHandle smpr_VzAmpGet;
 
-/** External variables */
-extern struct webworker webworker;
-extern struct dev_info device_info;
-extern __IO uint8_t *qspi_mode_addr;
-extern __IO uint8_t *qspi_std_addr;
+struct fpga_cmd_jump vFpgaGetJump = {0};
+extern xSemaphoreHandle smpr_VzJumpGet;
 
-extern struct litera_store letters_store[MAX_VZ_CNT];
-extern int _crnt_letters_cnt;
-extern int json_input_size;
+struct fpga_cmd_bank vFpgaGetBank = {0};
+extern xSemaphoreHandle smpr_VzBankGet;
 
-extern xSemaphoreHandle CanHttpOk_Semaphore;
-extern xQueueHandle GetAmp_Queue;
-extern xQueueHandle GetJump_Queue;
-extern xQueueHandle GetBank_Queue;
-extern xQueueHandle GetState_Queue;
+struct litera_status vLiteraStatus = {0};
 
-extern uint8_t SELF_NET_ID;
+float amplitude[AMP_MAX_COUNT*AMP_SET_COUNT] = {0};
 
-static char *GET_Handler(char *params);
-static char *POST_Handler(char *url, char *json, struct webworker *web);
-static void convert_ip(char *str_ip, uint8_t *out_ip);
-static void convert_mac(char *str_mac, uint8_t *out_mac);
-
-struct webworker webworker = {
-  .getHandler = GET_Handler,
-  .postHandler = POST_Handler,
-};
-
-struct fpga_cmd_jump cmd = {
-  .sync = SYNC_JUMP,
-  .cmd = CMD_BANK_WRITE,
-  .crc8 = 0,
-  .ext_ctrl = 0
-};
+char tmp_name[32] = {0};
+char tmp_pwr[8] = {0};
 
 struct fpga_cmd_amp cmd_amp = {
   .sync = SYNC_AMP,
@@ -57,753 +34,422 @@ struct fpga_cmd_amp cmd_amp = {
   .crc8 = 0
 };
 
-struct fpga_cmd_bank cmd_bank = {
-  .sync = SYNC_BANK,
-  .cmd = CMD_BANK_WRITE,
-  .crc8 = 0
-};
 
-struct fpga_cmd_flash_page page = {
-  .sync = SYNC_FLASH_PAGE,
-  .cmd = CMD_BANK_WRITE,
-  .crc8 = 0
-};
 
 /**
  * [GET_Handler description]
- * @author M.Beletsky
- * @date   2020-09-21
- * @param  params     [description]
- * @return            [description]
+ * @param url      [description]
+ * @param response [description]
  */
-static char *GET_Handler(char *params)
+__IO char* GET_Handler( char *url )
 {
-  char tempParams[strlen(params)];
-  strcpy(tempParams, params);
-  char *pUrl = strtok(tempParams, "?");
-  SysPkg_Typedef response;
+  memset( (void*)tmp_get_var, 0x00, NET_TEMP_GET_HANDL_SIZE );
 
-  for (int i = 0; i < SIZE_JSON_DUMP; i++)
-    json_dump[i] = 0;
-
-  if (strcmp(pUrl, "/api/whouser") == 0)
+  if (strstr(url, "api/getvz") != NULL)
   {
-    json_create((char*)json_dump, "user", (void*)webworker.crnt_user, "string");
-    json_create((char*)json_dump, "mode", (void*)(qspi_mode_addr+sizeof(uint32_t)), "obj");
-    json_create((char*)json_dump, "std", (void*)(qspi_std_addr+sizeof(uint32_t)), "obj");
-    if (strcmp(webworker.crnt_user, "admin") == 0)
-      json_create((char*)json_dump, "hash", (void*)device_info.admin_hash, "string");
-    else
-      json_create((char*)json_dump, "hash", (void*)device_info.user_hash, "string");
+    __IO char *pVz = tmp_post_var;
+    memset( (char*)pVz, 0x00, NET_TEMP_GET_HANDL_SIZE );
+    strcat( (char*)pVz, "[ " );
+    pVz += strlen( (char*)pVz );
 
-    //char *tmp_ip = pvPortMalloc(16);
-    char __IO *tmp_ip = (char __IO*)(0xC0560000);
-    //if (tmp_ip != NULL)
+    for (int iLit = 0; iLit < letters_cnt; iLit++)
     {
-      memset((char*)tmp_ip, 0x00, 128);
-      sprintf((char*)tmp_ip, "%d.%d.%d.%d", device_info.ipaddr[0], device_info.ipaddr[1], device_info.ipaddr[2], device_info.ipaddr[3]);
-      json_create((char*)json_dump, "ipaddr", (void*)tmp_ip, "string");
-      sprintf((char*)tmp_ip, "%d.%d.%d.%d", device_info.netmask[0], device_info.netmask[1], device_info.netmask[2], device_info.netmask[3]);
-      json_create((char*)json_dump, "netmask", (void*)tmp_ip, "string");
-      json_create((char*)json_dump, "dev_name", (void*)device_info.device_id, "string");
-      json_create((char*)json_dump, "dev_sn", (void*)device_info.sn, "string");
-      uint8_t hb1 = 0, hb2 = 0;
-      for (int i = 0 ; i < 6; i++)
+      for (int iSub = 0; iSub < letters_store[iLit].SublitCnt; iSub++)
       {
-        hb1 = device_info.macaddr[i] & 0xF;
-        hb2 = (device_info.macaddr[i] >> 4) & 0xF;
-        if (i == 5) {
-          sprintf((char*)tmp_ip+(i*3), "%X%X", hb2, hb1);
-        } else {
-          sprintf((char*)tmp_ip+(i*3), "%X%X:", hb2, hb1);
-        }
-      }
-      json_create((char*)json_dump, "dev_macaddr", (void*)tmp_ip, "string");
-    }
-    char __IO *vozb_all = (char __IO*)(0xC0560000);
-    //char *vozb_all = pvPortMalloc(128*_crnt_letters_cnt*2);
-    if (_crnt_letters_cnt != 0)
-    {
-      memset((char*)vozb_all, 0x00, 128*_crnt_letters_cnt*2);
-      sprintf((char*)vozb_all, "%s", "[");
-      char *amp_void = "[]\0";
-      for (int iLit = 0; iLit < _crnt_letters_cnt; iLit++)
-      {
-        for (int iSub = 0; iSub < letters_store[iLit].SublitCnt; iSub++)
+        json_create( (char*)pVz, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, "int" );
+        json_create( (char*)pVz, "name", (void*)letters_store[iLit].Name, "string" );
+        json_create( (char*)pVz, "start_freq", (void*)letters_store[iLit].SubLit[iSub].StartFreq, "int" );
+        json_create( (char*)pVz, "stop_freq", (void*)letters_store[iLit].SubLit[iSub].StopFreq, "int" );
+        json_create( (char*)pVz, "num_sublit", (void*)iSub, "int" );
+        json_create( (char*)pVz, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, "int" );
+        json_create( (char*)pVz, "multisignal_allow", (void*)(int)letters_store[iLit].multisignal_allow, "int" );
+        json_create( (char*)pVz, "phase_toggle_allow", (void*)((uint32_t)letters_store[iLit].SubLit[iSub].phase_toggle_allow), "int");
+        json_create( (char*)pVz, "amp", (void*)"[ ]", "obj" );
+        if ( iLit != letters_cnt-1 )
         {
-          //char* vozb_obj = pvPortMalloc(128);
-          char __IO *vozb_obj = (char __IO*)(0xC0570000);
-          //if (vozb_obj != NULL)
-          {
-            memset((char*)vozb_obj, 0x00, 128);
-            json_create((char*)vozb_obj, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, "int");
-            json_create((char*)vozb_obj, "name", (void*)letters_store[iLit].Name, "string");
-            json_create((char*)vozb_obj, "start_freq", (void*)letters_store[iLit].SubLit[iSub].StartFreq, "int");
-            json_create((char*)vozb_obj, "stop_freq", (void*)letters_store[iLit].SubLit[iSub].StopFreq, "int");
-            json_create((char*)vozb_obj, "num_sublit", (void*)iSub, "int");
-
-            //json_create(vozb_obj, "synth_freq", (void*)letters_store[iLit].SynthFreq, "int");
-            json_create((char*)vozb_obj, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, "int");
-            json_create((char*)vozb_obj, "ext_osk_en", (void*)letters_store[iLit].signal_mod, "int");
-
-            json_create((char*)vozb_obj, "amp", (void*)amp_void, "obj");
-            strcat((char*)vozb_all, (char*)vozb_obj);
-            if ( iLit != _crnt_letters_cnt-1 )
-            {
-              strcat((char*)vozb_all, ",");
-            }
-            else
-            {
-              if (iSub != letters_store[iLit].SublitCnt-1)
-              {
-                strcat((char*)vozb_all, ",");
-              }
-            }
-            //vPortFree(vozb_obj);
-          }
+          strcat( (char*)pVz, "," );
         }
-      }
-      strcat((char*)vozb_all, "]");
-      json_create((char*)json_dump, "vozb", (void*)vozb_all, "obj");
-      //vPortFree(vozb_all);
-    }
-    else
-    {
-      char *emp = "[  ]";
-      json_create((char*)json_dump, "vozb", (void*)emp, "obj");
-    }
-    int size_vozb_edit_arr = (164*_crnt_letters_cnt*2);
-    //char *vozb_edit_arr = pvPortMalloc(size_vozb_edit_arr);
-    char __IO *vozb_edit_arr = (char __IO*)(0xC0560000);
-    if (size_vozb_edit_arr != 0)
-    {
-      memset((char*)vozb_edit_arr, 0x00, size_vozb_edit_arr);
-      sprintf((char*)vozb_edit_arr, "%s", "[");
-      for (int iLit = 0; iLit < _crnt_letters_cnt; iLit++)
-      {
-        //char* vozb_edit_obj = pvPortMalloc(164);
-        char __IO *vozb_edit_obj = (char __IO*)(0xC0570000);
-        //if (vozb_edit_obj != NULL)
+        else
         {
-          memset((char*)vozb_edit_obj, 0x00, 164);
-          json_create((char*)vozb_edit_obj, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, "int");
-          json_create((char*)vozb_edit_obj, "name", (void*)letters_store[iLit].Name, "string");
-          json_create((char*)vozb_edit_obj, "sn", (void*)letters_store[iLit].SN, "int");
-          json_create((char*)vozb_edit_obj, "start_freq", (void*)letters_store[iLit].StartFreq, "int");
-          json_create((char*)vozb_edit_obj, "stop_freq", (void*)letters_store[iLit].StopFreq, "int");
-          json_create((char*)vozb_edit_obj, "synth_freq", (void*)letters_store[iLit].SynthFreq, "int");
-          json_create((char*)vozb_edit_obj, "ext_osk_en", (void*)letters_store[iLit].signal_mod, "int");
-          json_create((char*)vozb_edit_obj, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, "int");
-          strcat((char*)vozb_edit_arr, (char*)vozb_edit_obj);
-          if ( iLit != _crnt_letters_cnt-1 )
-          {
-            strcat((char*)vozb_edit_arr, ",");
-          }
-          //vPortFree(vozb_edit_obj);
+          if (iSub != letters_store[iLit].SublitCnt-1)
+            strcat( (char*)pVz, "," );
         }
+        pVz += strlen( (char*)pVz );
       }
-      strcat((char*)vozb_edit_arr, "]");
-      json_create((char*)json_dump, "vozb_edit", (void*)vozb_edit_arr, "obj");
-      //vPortFree(vozb_edit_arr);
     }
-    else
-    {
-      char *emp = "[  ]";
-      json_create((char*)json_dump, "vozb_edit", (void*)emp, "obj");
-    }
-  }
-  else if (strcmp(pUrl, "/api/devinfo") == 0)
-  {
-    json_create((char*)json_dump, "device_id", (void*)device_info.device_id, "string");
-    json_create((char*)json_dump, "sn", (void*)device_info.sn, "string");
-    json_create((char*)json_dump, "mode", (void*)device_info.mode, "int");
-    json_create((char*)json_dump, "sm", (void*)device_info.submode, "int");
-    json_create((char*)json_dump, "emit", (void*)device_info.emit, "int");
-
-    //char *tmp_arr = pvPortMalloc(128);
-    char __IO *tmp_arr = (char __IO*)(0xC0560000);
-    //if (tmp_arr != NULL)
-    {
-      memset((char*)tmp_arr, 0x00, 1024);
-      sprintf((char*)tmp_arr, "[%d,%d,%d,%d]", device_info.irp[0], device_info.irp[1], device_info.irp[2], device_info.irp[3]);
-      json_create((char*)json_dump, "irp", (void*)tmp_arr, "obj");
-      sprintf((char*)tmp_arr, "[%d,%d,%d,%d]", device_info.afu[0], device_info.afu[1], device_info.afu[2], device_info.afu[3]);
-      json_create((char*)json_dump, "afu", (void*)tmp_arr, "obj");
-      sprintf((char*)tmp_arr, "[%d,%d,%d,%d]", device_info.lit_en[0], device_info.lit_en[1], device_info.lit_en[2], device_info.lit_en[3]);
-      json_create((char*)json_dump, "lit_en", (void*)tmp_arr, "obj");
-      //vPortFree(tmp_arr);
-    }
-  }
-  else if (strcmp(pUrl, "/api/state-vz") == 0)
-  {
-    char __IO *vz_state_obj = (char __IO*)(0xC0500000);
-    struct litera_status litera_status;
-    sprintf((char*)json_dump, "[");
+    strcat( (char*)pVz, " ]" );
+    json_create( (char*)tmp_get_var, "vz", (void*)tmp_post_var, "obj" );
     
-    for (int iVz = 0; iVz < _crnt_letters_cnt; iVz++)
-    {
-      response = Utils_CmdCreate(letters_store[iVz].SELF_CAN_ID, SELF_NET_ID, CMD_VOZB_GET_STATUS,
-                                               sizeof(SysPkg_Typedef), NULL, false, 0, 0);
-      FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&response, sizeof(SysPkg_Typedef));
+    memset((char*)tmp_post_var, 0x00, strlen((char*)tmp_post_var));
+    char *vozb_edit_arr = (char *)(tmp_post_var);
+    strcat( vozb_edit_arr, "[" );
+    vozb_edit_arr++;
 
-      if (xQueueReceive(GetState_Queue, &(litera_status), pdMS_TO_TICKS(500)) == pdTRUE)
+    for (int iLit = 0; iLit < letters_cnt; iLit++)
+    {
+      json_create((char*)vozb_edit_arr, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, "int");
+      json_create((char*)vozb_edit_arr, "name", (void*)letters_store[iLit].Name, "string");
+      json_create((char*)vozb_edit_arr, "sn", (void*)letters_store[iLit].SN, "string");
+      json_create((char*)vozb_edit_arr, "start_freq", (void*)letters_store[iLit].StartFreq, "int");
+      json_create((char*)vozb_edit_arr, "stop_freq", (void*)letters_store[iLit].StopFreq, "int");
+        
+      for (int iSub = 0; iSub < letters_store[iLit].SublitCnt; iSub++)
       {
-        for (int iSub = 0; iSub < letters_store[iVz].SublitCnt; iSub++)
+        memset((char*)tmp_name, 0x00, 32);
+        sprintf((char*)tmp_name, "start_freq_sub%d", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)letters_store[iLit].SubLit[iSub].StartFreq, "int");
+          
+        memset((char*)tmp_name, 0x00, 32);
+        sprintf((char*)tmp_name, "stop_freq_sub%d", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)letters_store[iLit].SubLit[iSub].StopFreq, "int");
+
+        memset((char*)tmp_name, 0x00, 32);
+        sprintf((char*)tmp_name, "phase_toggle_allow%d", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)((int)letters_store[iLit].SubLit[iSub].phase_toggle_allow), "int");
+
+        memset((char*)tmp_name, 0x00, 32);
+        sprintf((char*)tmp_name, "pwr_sub%d", (iSub+1));
+        memset((char*)tmp_pwr, 0x00, 8);
+        sprintf((char*)tmp_pwr, "%.1f", letters_store[iLit].SubLit[iSub].PowerTreshhold);
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)tmp_pwr, "obj");
+      }
+
+      json_create((char*)vozb_edit_arr, "synth_freq", (void*)letters_store[iLit].SynthFreq, "int");
+      json_create((char*)vozb_edit_arr, "multisignal_allow", (void*)((uint32_t)letters_store[iLit].multisignal_allow), "int");
+      json_create((char*)vozb_edit_arr, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, "int");
+      if ( iLit != letters_cnt-1 )
+        strcat((char*)vozb_edit_arr, ",");
+      vozb_edit_arr += strlen(vozb_edit_arr);
+    }
+    strcat((char*)vozb_edit_arr, "]");
+    json_create((char*)tmp_get_var, "vozb_edit", (void*)tmp_post_var, "obj");
+  }
+  
+  else if (strstr(url, "api/state-vz") != NULL)
+  {
+    if (xSemaphoreTake( mtx_BlockStateRequest, pdMS_TO_TICKS(500) ) == pdTRUE)
+    {
+      char *vz_state_obj = (char *)(tmp_get_var);
+      sprintf((char*)vz_state_obj, "[");
+      vz_state_obj++;
+      for (int iVz = 0; iVz < letters_cnt; ++iVz)
+      {
+        if ( VZ_GetStatus( letters_store[iVz].SELF_CAN_ID ) != ERROR_NONE )
+          continue;
+
+        for (int iSub = 0; iSub < letters_store[iVz].SublitCnt; ++iSub)
         {
-          memset((char*)vz_state_obj, 0x00, 2048);
           json_create((char*)vz_state_obj, "name", (void*)letters_store[iVz].Name, "string");
-          json_create((char*)vz_state_obj, "can_id", (void*)litera_status.SELF_CAN_ID, "int");
+          json_create((char*)vz_state_obj, "can_id", (void*)vLiteraStatus.SELF_CAN_ID, "int");
           json_create((char*)vz_state_obj, "num_sublit", (void*)iSub, "int");
           json_create((char*)vz_state_obj, "start_freq", (void*)letters_store[iVz].SubLit[iSub].StartFreq, "int");
           json_create((char*)vz_state_obj, "stop_freq", (void*)letters_store[iVz].SubLit[iSub].StopFreq, "int");
-          json_create((char*)vz_state_obj, "temp_fpga", (void*)(int)litera_status.sublit[iSub].fpga_status.curr_Temp, "int");
-          json_create((char*)vz_state_obj, "max_temp_fpga", (void*)(int)litera_status.sublit[iSub].fpga_status.max_Temp, "int");
-          json_create((char*)vz_state_obj, "min_temp_fpga", (void*)(int)litera_status.sublit[iSub].fpga_status.min_Temp, "int");
-          json_create((char*)vz_state_obj, "temp_stm", (void*)(int)litera_status.stm_temperture, "int");
-          json_create((char*)vz_state_obj, "vcc_dds", (void*)litera_status.sublit[iSub].vcc_18, "int");
-          json_create((char*)vz_state_obj, "vcc_fpga", (void*)litera_status.sublit[iSub].vcc_33, "int");
-          json_create((char*)vz_state_obj, "pout_vz", (void*)(int)litera_status.sublit[iSub].power_det, "int");
-          json_create((char*)vz_state_obj, "mode_vz", (void*)(int)device_info.mode_vz, "int");
-          strcat((char*)json_dump, (char*)vz_state_obj);
-          if ( iVz != _crnt_letters_cnt-1 )
+          json_create((char*)vz_state_obj, "temp_fpga", (void*)(int)vLiteraStatus.sublit[iSub].fpga_status.curr_Temp, "int");
+          json_create((char*)vz_state_obj, "max_temp_fpga", (void*)(int)vLiteraStatus.sublit[iSub].fpga_status.max_Temp, "int");
+          json_create((char*)vz_state_obj, "min_temp_fpga", (void*)(int)vLiteraStatus.sublit[iSub].fpga_status.min_Temp, "int");
+          json_create((char*)vz_state_obj, "temp_stm", (void*)(int)vLiteraStatus.stm_temperture, "int");
+          json_create((char*)vz_state_obj, "vcc_dds", (void*)vLiteraStatus.sublit[iSub].vcc_18, "int");
+          json_create((char*)vz_state_obj, "vcc_fpga", (void*)vLiteraStatus.sublit[iSub].vcc_33, "int");
+          json_create((char*)vz_state_obj, "pout_vz", (void*)(int)vLiteraStatus.sublit[iSub].power_det, "int");
+          json_create((char*)vz_state_obj, "mode_vz", (void*)(int)device_status.mode_vz, "int");
+          if ( iVz != letters_cnt-1 )
           {
-            strcat((char*)json_dump, ",");
+            strcat((char*)vz_state_obj, ",");
           }
           else
           {
             if (iSub != letters_store[iVz].SublitCnt-1)
             {
-              strcat((char*)json_dump, ",");
+              strcat((char*)vz_state_obj, ",");
             }
           }
+          vz_state_obj += strlen(vz_state_obj);
         }
       }
+      strcat((char*)vz_state_obj, "]");
+      xSemaphoreGive( mtx_BlockStateRequest );
     }
-    strcat((char*)json_dump, "]");
   }
-  return (char*)json_dump;
+
+  return tmp_get_var;
 }
 
 /**
  * [POST_Handler description]
- * @author M.Beletsky
- * @date   2020-09-21
- * @param  url        [description]
- * @param  json       [description]
- * @param  web        [description]
- * @return            [description]
+ * @param url      [description]
+ * @param json     [description]
+ * @param response [description]
  */
-static char *POST_Handler(char *url, char *json, struct webworker *web)
+__IO char* POST_Handler( char *url, char *json )
 {
-  for (int i = 0; i < SIZE_JSON_DUMP; i++)
-    json_dump[i] = 0;
-  
-  if (strcmp(url, "api/auth") == 0)
-  {
-    json_get(json, "hash", (void*)json_dump);
-    if (strcmp((char*)json_dump, device_info.admin_hash) == 0)
-    {
-      memset((char*)json_dump, 0x00, SIZE_JSON_DUMP);
-      sprintf(web->crnt_user, "%s", "admin");
-      json_create((char*)json_dump, "token", (void*)(web->token), "string");
-      return (char*)json_dump;
-    }
-    else if (strcmp((char*)json_dump, device_info.user_hash) == 0)
-    {
-      memset((char*)json_dump, 0x00, SIZE_JSON_DUMP);
-      sprintf(web->crnt_user, "%s", "user");
-      json_create((char*)json_dump, "token", (void*)(web->token), "string");
-      return (char*)json_dump;
-    }
-    else
-    {
-      sprintf(web->crnt_user, "%s", "");
-    }
-  }
-  else if (strcmp(url, "api/change-mode") == 0)
-  {
-    int mode = 0, sm = 0, mode_vz = 0;
-    json_get(json, "mode", (void*)&mode);
-    device_info.mode = mode;
-    json_get(json, "sm", (void*)&sm);
-    device_info.submode = sm;
-    json_get(json, "mode_vz", (void*)&mode_vz);
-    device_info.mode_vz = mode_vz;
+  memset((void*)tmp_post_var, 0x00, NET_TEMP_POST_HANDL_SIZE);
 
-    /** Устанавливаем прежний режим */
-    for (int iVz = 0; iVz < _crnt_letters_cnt; iVz++)
+  /** Получение аплитуды рампы возбудителя */
+  else if (strstr(url, "api/get-amp") != NULL)
+  {
+    if (xSemaphoreTake( mtx_BlockStateRequest, pdMS_TO_TICKS(500) ) == pdTRUE)
     {
-      for (int iRamp = 0; iRamp < letters_store[iVz].SublitCnt; iRamp++)
+      uint32_t can_id = 0;
+      uint32_t num_sublit = 0;
+      json_get(json, "can_id", (void*)&can_id, jsINT);
+      json_get(json, "num_sublit", (void*)&num_sublit, jsINT);
+
+      /** Запрашиваем аплитуду с возбудителя */
+      FPGA_getAmp( &vFpgaGetAmp, can_id, num_sublit );
+      /** Дожидаемся ответа */
+      if ( xSemaphoreTake( smpr_VzAmpGet, pdMS_TO_TICKS(1000) ) != pdTRUE )
       {
-        FPGA_changeMode(letters_store[iVz].SELF_CAN_ID, iRamp, mode_vz, 0);
-        /** Дожидаемся ответа и если его нет в течении 500 мс, повторяем отправку */
-        if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-        {
-          FPGA_changeMode(letters_store[iVz].SELF_CAN_ID, iRamp, mode_vz, 0);
-          xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-        }
+        FPGA_getAmp( &vFpgaGetAmp, can_id, num_sublit);
+        if ( xSemaphoreTake( smpr_VzAmpGet, pdMS_TO_TICKS(1000) ) != pdTRUE )
+          return NULL;
       }
-    }
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/change-emit") == 0)
-  {
-    device_info.emit = !device_info.emit;
-    SysPkg_Typedef request = Utils_CmdCreate(NET_CAST, SELF_NET_ID, CMD_GLOBAL_EMIT,
-                                  sizeof(SysPkg_Typedef), NULL, false, (uint8_t)device_info.emit, 0);
-    FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&request, sizeof(SysPkg_Typedef));
-
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/lit-en") == 0)
-  {
-    int lit = 0, en = 0;;
-    json_get(json, "lit", (void*)&lit);
-    json_get(json, "en", (void*)&en);
-    device_info.lit_en[lit] = (uint8_t)en;
-    SysPkg_Typedef request = Utils_CmdCreate(NET_CAST, SELF_NET_ID, CMD_LIT_CHANGE_STATE,
-                                             sizeof(SysPkg_Typedef), NULL, false, (uint8_t)en, (uint8_t)lit);
-    FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&request, sizeof(SysPkg_Typedef));
-
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/save-std") == 0)
-  {
-    CSP_QUADSPI_Init();
-    uint32_t address = (QSPI_STD_ADDRESS-QSPI_START_ADDRESS);
-    uint32_t size = (strstr(json, "}]")+strlen("}]")-json);
-    if (CSP_QSPI_EraseSector(address, address+sizeof(uint32_t)+size) == HAL_OK)
-    {
-      uint32_t synqseq = SYNQSEQ_DEF;
-      CSP_QSPI_WriteMemory((uint8_t*)&synqseq, address, sizeof(uint32_t));
-      CSP_QSPI_WriteMemory((uint8_t*)json, address+sizeof(uint32_t), size);
-      uint8_t nol = 0;
-      CSP_QSPI_WriteMemory((uint8_t*)&nol, address+sizeof(uint32_t)+size, sizeof(uint8_t));
-    }
-    CSP_QSPI_EnableMemoryMappedMode();
-  }
-  else if (strcmp(url, "api/save-mode") == 0)
-  {
-    CSP_QUADSPI_Init();
-    uint32_t address = (QSPI_MODE_ADDRESS-QSPI_START_ADDRESS);
-    uint32_t size = json_input_size-strlen("{\"json\":")-1;
-    if (CSP_QSPI_EraseSector(address, address+sizeof(uint32_t)+size) == HAL_OK)
-    {
-      uint32_t synqseq = SYNQSEQ_DEF;
-      CSP_QSPI_WriteMemory((uint8_t*)&synqseq, address, sizeof(uint32_t));
-      CSP_QSPI_WriteMemory((uint8_t*)json, address+sizeof(uint32_t), size);
-      uint8_t nol = 0;
-      CSP_QSPI_WriteMemory((uint8_t*)&nol, address+sizeof(uint32_t)+size, sizeof(uint8_t));
-    }
-    CSP_QSPI_EnableMemoryMappedMode();
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/clear-mode") == 0)
-  {
-    /** Остановка рампы */
-    for (int iVz = 0; iVz < _crnt_letters_cnt; iVz++)
-    {
-      for (int iRamp = 0; iRamp < letters_store[iVz].SublitCnt; iRamp++)
-      {
-        FPGA_sendCmd(letters_store[iVz].SELF_CAN_ID, iRamp, CMD_RAMP_OFF, CMD_VOZB_STOP_RAMP);
-        if (iRamp == 0)
-          osDelay(100);
-        /** Дожидаемся ответа и если его нет в течении 500 мс, повторяем отправку */
-        if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-        {
-          printf("--> Disable ramp TIMEOUT: %d\n", iRamp);
-          FPGA_sendCmd(letters_store[iVz].SELF_CAN_ID, iRamp, CMD_RAMP_OFF, CMD_VOZB_STOP_RAMP);
-          xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-        }
-      }
-    }
-    /** Очистка выбранного режима */
-    uint32_t mode = 0;
-    json_get(json, "mode", (void*)&mode);
-    
-    for (int iVz = 0; iVz < _crnt_letters_cnt; iVz++)
-    {
-      for (int iRamp = 0; iRamp < letters_store[iVz].SublitCnt; iRamp++)
-      {
-        FPGA_modeErase(letters_store[iVz].SELF_CAN_ID, iRamp, mode);
-        if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-        {
-          printf("--> Clear mode TIMEOUT: %d\n", mode);
-          FPGA_modeErase(letters_store[iVz].SELF_CAN_ID, iRamp, mode);
-          xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-        }
-      }
-    }
-    /** Отправка ответа */
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/set-jump") == 0)
-  {
-    for (int iJump = 0; iJump < 8; iJump++)
-    {
-      cmd.jump[iJump].jump_start_freq = 0;
-      cmd.jump[iJump].jump_stop_freq = 0;
-    }
-    
-   // memset(&cmd, 0x00, sizeof(struct fpga_cmd_jump));
-    uint32_t can_id = 0;
-    uint32_t num_sublit = 0;
-    int tmp = 0;
-    
-    json_get(json, "can_id", (void*)&can_id);
-    json_get(json, "num_sublit", (void*)&num_sublit);
-
-    json_get(json, "jump_en", (void*)&cmd.jump_en);
-    json_get(json, "mod", (void*)&tmp);
-    cmd.mode = (uint16_t)tmp;
-    json_get(json, "submod", (void*)&tmp);
-    cmd.submod = (uint16_t)tmp;
-    json_get(json, "curr_bank_cnt", (void*)&cmd.bank_cnt);
-    json_get(json, "ext_ctrl", (void*)&cmd.ext_ctrl);
-
-    json_get(json, "ext_osk_en", (void*)&tmp);
-    cmd.ext_osk_en = (uint8_t)tmp;
-    json_get(json, "amp_set_num", (void*)&tmp);
-    cmd.amp_set_num = (uint8_t)tmp;
-    json_get(json, "ext_flag1", (void*)&tmp);
-    cmd.ext_flag1 = (uint8_t)tmp;
-    json_get(json, "ext_flag2", (void*)&tmp);
-    cmd.ext_flag2 = (uint8_t)tmp;
-
-    json_get(json, "period", (void*)&cmd.period);
-    json_get(json, "duty_cycle", (void*)&cmd.duty_cycle);
-    json_get(json, "rnd_period", (void*)&cmd.rnd_period);
-    json_get(json, "rnd_duty_cycle", (void*)&cmd.rnd_duty_cycle);
-
-    //char *pArr = pvPortMalloc(300);
-    char __IO *pArr = (char __IO*)(0xC0500000);
-    //if (pArr != NULL)
-    {
-      memset((char*)pArr, 0x00, 300);
-      char *jset = strstr(json, "jump_set\":");
-      jset = jset+strlen("jump_set\":");
-      strcpy((char*)pArr, jset);
-      char *ppArr = (char*)pArr;
-      for (int iJump = 0; iJump < 8; iJump++)
-      {
-        char *obj = strtok(ppArr, "}");
-        if (obj != NULL)
-        {
-          json_get(obj, "start_freq", (void*)&cmd.jump[iJump].jump_start_freq);
-          json_get(obj, "stop_freq", (void*)&cmd.jump[iJump].jump_stop_freq);
-        }
-        else
-        {
-          break;
-        }
-        ppArr += strlen(obj)+1;
-      }
-      //vPortFree(pArr);
-    }
-
-    if((cmd.amp_set_num<0) || (cmd.amp_set_num>1))
-    {
-      cmd.amp_set_num=0;
-      cmd.ext_ctrl=0;
-    }
-
-    for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
-    {
-      if (can_id == letters_store[iVz].SELF_CAN_ID)
-      {
-        Manage_calcJumpsDDS(cmd.jump, &letters_store[iVz], (uint8_t)num_sublit);
-        break;
-      }
-    }
-    /** Отправка jump в возбудитель */
-    FPGA_setJump(&cmd, can_id, num_sublit);
-    //printf("--> Set jump\n");
-    /** Дожидаемся ответа и в случае его отсутсвия повторяем отправку */
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-    {
-      printf("--> Set jump TIMEOUT\n");
-      FPGA_setJump(&cmd, can_id, num_sublit);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-    }
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/set-bank") == 0)
-  {
-    uint32_t can_id = 0;
-    uint32_t num_sublit = 0;
-    uint32_t temp = 0;
-    json_get(json, "can_id", (void*)&can_id);
-    json_get(json, "num_sublit", (void*)&num_sublit);
-
-    json_get(json, "mod", (void*)&temp);
-    cmd_bank.mode = (uint16_t)temp;
-    json_get(json, "submod", (void*)&temp);
-    cmd_bank.submod = (uint16_t)temp;
-    json_get(json, "bank_num", (void*)&cmd_bank.bank_num);
-
-    json_get(json, "start_freq", (void*)&cmd_bank.bank.start_freq);
-    json_get(json, "stop_freq", (void*)&cmd_bank.bank.stop_freq);
-    json_get(json, "step_freq", (void*)&cmd_bank.bank.step_freq);
-    json_get(json, "step_mask", (void*)&cmd_bank.bank.step_mask);
-    json_get(json, "run_mask", (void*)&cmd_bank.bank.run_mask);
-
-    json_get(json, "phase_in", (void*)&temp);
-    cmd_bank.bank.phase_in = (uint16_t)temp;
-    json_get(json, "next_bank", (void*)&temp);
-    cmd_bank.bank.next_bank = (uint16_t)temp;
-
-    json_get(json, "phase_toggle_step", (void*)&temp);
-    cmd_bank.bank.phase_toggle_step = (uint8_t)temp;
-    json_get(json, "flags_bank", (void*)&temp);
-    cmd_bank.bank.flags_bank = (uint8_t)temp;
-
-    json_get(json, "base_lsfr_polynome", (void*)&temp);
-    cmd_bank.bank.base_lsfr_polynome = (uint16_t)temp;
-    json_get(json, "hight_step_lsfr_polynome", (void*)&temp);
-    cmd_bank.bank.hight_step_lsfr_polynome = (uint16_t)temp;
-    json_get(json, "hight_run_lsfr_polynome", (void*)&temp);
-    cmd_bank.bank.hight_run_lsfr_polynome = (uint16_t)temp;
-
-    /** Выполняем пересчет банка */
-    for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
-    {
-      if (can_id == letters_store[iVz].SELF_CAN_ID)
-      {
-        Manage_calcBanksDDS(&cmd_bank.bank, &letters_store[iVz], (uint8_t)num_sublit);
-        break;
-      }
-    }
-    /** Отправляем банк в возбудитель и дожидаемся ответа */
-    FPGA_setBank(&cmd_bank, can_id, num_sublit);
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-    {
-      FPGA_setBank(&cmd_bank, can_id, num_sublit);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-    }
-    /** На каждый банк возвращаем ответ */
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/get-amp") == 0)
-  {
-    uint32_t can_id = 0;
-    uint32_t num_sublit = 0;
-    json_get(json, "can_id", (void*)&can_id);
-    json_get(json, "num_sublit", (void*)&num_sublit);
-
-    /** Запрашиваем аплитуду с возбудителя */
-    struct fpga_cmd_amp cmd_get_amp;
-    FPGA_getAmp(&cmd_get_amp, can_id, num_sublit);
-    /** Дожидаемся ответа */
-    if (xQueueReceive(GetAmp_Queue, &(cmd_get_amp), pdMS_TO_TICKS(1000)) != pdTRUE)
-    {
-      FPGA_getAmp(&cmd_get_amp, can_id, num_sublit);
-      if (xQueueReceive(GetAmp_Queue, &(cmd_get_amp), pdMS_TO_TICKS(1000)) != pdTRUE)
-      {
-        return NULL;
-      }
-    }
-    /** Выполняем обратный пересчет амплитуд, аттенюации и частот */
-    for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
-    {
-      if (can_id == letters_store[iVz].SELF_CAN_ID)
-      {
-        Manage_reCalcAmpsDDS(cmd_get_amp.amp, &letters_store[iVz], num_sublit);
-        break;
-      }
-    }
-    /** Формируем JSON */
-    char __IO *amp_obj = (char __IO*)(0xC0500000); //pvPortMalloc(128*AMP_MAX_COUNT*AMP_SET_COUNT+20);
-    //if (amp_obj != NULL)
-    {
-      memset((char*)amp_obj, 0x00, (128*AMP_MAX_COUNT*AMP_SET_COUNT+20));
-      sprintf((char*)amp_obj, "[");
-      for (int iAmp = 0; iAmp < AMP_MAX_COUNT*AMP_SET_COUNT; iAmp++)
-      {
-        char __IO *amp = (char __IO*)(0xC050F000);//pvPortMalloc(128);
-        memset((char*)amp, 0x00, 128);
-        //if (amp != NULL)
-        {
-          json_create((char*)amp, "amp_start_freq", (void*)cmd_get_amp.amp[iAmp].amp_start_freq, "int");
-          json_create((char*)amp, "amp_in", (void*)((int)cmd_get_amp.amp[iAmp].amp_in), "int");
-          json_create((char*)amp, "att_in", (void*)((int)cmd_get_amp.amp[iAmp].att_in), "int");
-          strcat((char*)amp_obj, (char*)amp);
-          if (iAmp != ((AMP_MAX_COUNT*AMP_SET_COUNT)-1))
-            strcat((char*)amp_obj, ",");
-          //vPortFree(amp);
-        }
-      }
-      strcat((char*)amp_obj, "]");
-      json_create((char*)json_dump, "amp", (void*)amp_obj, "obj");
-      //vPortFree(amp_obj);
-    }
-    /** И возвращаем его */
-    return (char*)json_dump;
-  }
-  else if (strcmp(url, "api/get-bank") == 0)
-  {
-    uint32_t can_id = 0;
-    uint32_t num_sublit = 0;
-    uint32_t mode = 0;
-    uint32_t submode = 0;
-    json_get(json, "can_id", (void*)&can_id);
-    json_get(json, "num_sublit", (void*)&num_sublit);
-    json_get(json, "mode", (void*)&mode);
-    json_get(json, "submod", (void*)&submode);
-
-    /** Запрашиваем Jump с возбудителя */
-    FPGA_getJump(can_id, num_sublit, mode, submode);
-    /** Дожидаемся ответа */
-    struct fpga_cmd_jump cmd_get_jump;
-    if (xQueueReceive(GetJump_Queue, &(cmd_get_jump), pdMS_TO_TICKS(500)) == pdTRUE)
-    {
-      json_create((char*)json_dump, "mode", (void*)cmd_get_jump.mode, "int");
-      json_create((char*)json_dump, "submod", (void*)cmd_get_jump.submod, "int");
-      json_create((char*)json_dump, "bank_cnt", (void*)cmd_get_jump.bank_cnt, "int");
-      json_create((char*)json_dump, "ext_ctrl", (void*)cmd_get_jump.ext_ctrl, "int");
-      json_create((char*)json_dump, "ext_osk_en", (void*)cmd_get_jump.ext_osk_en, "int");
-      json_create((char*)json_dump, "amp_set_num", (void*)cmd_get_jump.amp_set_num, "int");
-      json_create((char*)json_dump, "ext_flag1", (void*)cmd_get_jump.ext_flag1, "int");
-      json_create((char*)json_dump, "ext_flag2", (void*)cmd_get_jump.ext_flag2, "int");
-      json_create((char*)json_dump, "period", (void*)cmd_get_jump.period, "int");
-      json_create((char*)json_dump, "duty_cycle", (void*)cmd_get_jump.duty_cycle, "int");
-      json_create((char*)json_dump, "rnd_period", (void*)cmd_get_jump.rnd_period, "int");
-      json_create((char*)json_dump, "rnd_duty_cycle", (void*)cmd_get_jump.rnd_duty_cycle, "int");
+      /** Выполняем обратный пересчет амплитуд, аттенюации и частот */
       for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
       {
         if (can_id == letters_store[iVz].SELF_CAN_ID)
         {
-          json_create((char*)json_dump, "synth_freq", (void*)letters_store[iVz].SynthFreq, "int");
-          Manage_reCalcJumpsDDS(cmd_get_jump.jump, &letters_store[iVz], num_sublit);
+          VZ_reCalcAmpsDDS( vFpgaGetAmp.amp, amplitude, &letters_store[iVz], num_sublit );
+          break;
+        }
+      }
+      /** Формируем JSON */
+      char *amp_obj = (char*)tmp_get_var;
+      memset( (char*)amp_obj, 0x00, NET_TEMP_GET_HANDL_SIZE );
+      sprintf( (char*)amp_obj, "[" );
+      amp_obj++;
+      for (int iAmp = 0; iAmp < AMP_MAX_COUNT*AMP_SET_COUNT; iAmp++)
+      {
+        json_create((char*)amp_obj, "amp_start_freq", (void*)vFpgaGetAmp.amp[iAmp].amp_start_freq, "int");
+        json_create((char*)amp_obj, "amp_in", (void*)&amplitude[iAmp], "float");
+        json_create((char*)amp_obj, "att_in", (void*)((int)vFpgaGetAmp.amp[iAmp].att_in), "int");
+        if (iAmp != ((AMP_MAX_COUNT*AMP_SET_COUNT)-1))
+          strcat((char*)amp_obj, ",");
+        amp_obj += strlen(amp_obj);
+      }
+      strcat((char*)amp_obj, "]");
+
+      xSemaphoreGive( mtx_BlockStateRequest );
+    }
+    json_create((char*)tmp_post_var, "amp", (void*)tmp_get_var, "obj");
+    /** И возвращаем его */
+    return tmp_post_var;
+  }
+  /** Запрос банков */
+  else if (strstr(url, "api/get-bank") != NULL)
+  {
+    if (xSemaphoreTake( mtx_BlockStateRequest, pdMS_TO_TICKS(500) ) == pdTRUE)
+    {
+      uint32_t can_id = 0;
+      uint32_t num_sublit = 0;
+      uint32_t mode = 0;
+      uint32_t submode = 0;
+      json_get(json, "can_id", (void*)&can_id);
+      json_get(json, "num_sublit", (void*)&num_sublit);
+      json_get(json, "mode", (void*)&mode);
+      json_get(json, "submod", (void*)&submode);
+
+      /** Запрашиваем Jump с возбудителя */
+      FPGA_getJump(can_id, num_sublit, mode, submode);
+      /** Дожидаемся ответа */
+      if ( xSemaphoreTake( smpr_VzJumpGet, pdMS_TO_TICKS(500)) != pdTRUE )
+      {
+        FPGA_getJump(can_id, num_sublit, mode, submode);
+        if ( xSemaphoreTake( smpr_VzJumpGet, pdMS_TO_TICKS(500)) != pdTRUE )
+          return NULL;
+      }
+
+      json_create((char*)tmp_post_var, "mode", (void*)(int)vFpgaGetJump.mode, "int");
+      json_create((char*)tmp_post_var, "submod", (void*)(int)vFpgaGetJump.submod, "int");
+      json_create((char*)tmp_post_var, "bank_cnt", (void*)vFpgaGetJump.bank_cnt, "int");
+      json_create((char*)tmp_post_var, "ext_ctrl", (void*)vFpgaGetJump.ext_ctrl, "int");
+      json_create((char*)tmp_post_var, "ext_osk_en", (void*)(int)vFpgaGetJump.ext_osk_en, "int");
+      json_create((char*)tmp_post_var, "amp_set_num", (void*)(int)vFpgaGetJump.amp_set_num, "int");
+      json_create((char*)tmp_post_var, "ext_flag1", (void*)(int)vFpgaGetJump.ext_flag1, "int");
+      json_create((char*)tmp_post_var, "ext_flag2", (void*)(int)vFpgaGetJump.ext_flag2, "int");
+      json_create((char*)tmp_post_var, "period", (void*)vFpgaGetJump.period, "int");
+      json_create((char*)tmp_post_var, "duty_cycle", (void*)vFpgaGetJump.duty_cycle, "int");
+      json_create((char*)tmp_post_var, "rnd_period", (void*)vFpgaGetJump.rnd_period, "int");
+      json_create((char*)tmp_post_var, "rnd_duty_cycle", (void*)vFpgaGetJump.rnd_duty_cycle, "int");
+      for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
+      {
+        if (can_id == letters_store[iVz].SELF_CAN_ID)
+        {
+          json_create((char*)tmp_post_var, "synth_freq", (void*)letters_store[iVz].SynthFreq, "int");
+          VZ_reCalcJumpsDDS( vFpgaGetJump.jump, &letters_store[iVz], num_sublit );
           break;
         }
       }
       /** Составляем JSON для jump */
-      char *jump_obj = pvPortMalloc(128*JUMP_MAX_COUNT+20);
-      if (jump_obj != NULL)
+      char *jump_obj = (char*)tmp_get_var;
+      memset(jump_obj, 0x00, NET_TEMP_GET_HANDL_SIZE);
+      sprintf(jump_obj, "[");
+      jump_obj++;
+      for (int iJump = 0; iJump < JUMP_MAX_COUNT; iJump++)
       {
-        memset(jump_obj, 0x00, (128*JUMP_MAX_COUNT+20));
-        sprintf(jump_obj, "[");
-        for (int iJump = 0; iJump < JUMP_MAX_COUNT; iJump++)
-        {
-          char *jump = pvPortMalloc(128);
-          if (jump != NULL)
-          {
-            memset(jump, 0x00, 128);
-            json_create((char*)jump, "jump_id", (void*)iJump, "int");
-            json_create((char*)jump, "jump_en", (void*)((cmd_get_jump.jump_en >> iJump)&0x01), "int");
-            json_create((char*)jump, "jump_start_freq", (void*)cmd_get_jump.jump[iJump].jump_start_freq, "int");
-            json_create((char*)jump, "jump_stop_freq", (void*)cmd_get_jump.jump[iJump].jump_stop_freq, "int");
-            strcat(jump_obj, jump);
-            if (iJump != (JUMP_MAX_COUNT-1))
-              strcat(jump_obj, ",");
-            vPortFree(jump);
-          }
-        }
-        strcat(jump_obj, "]");
-        json_create((char*)json_dump, "jump", (void*)jump_obj, "obj");
-        vPortFree(jump_obj);
+        json_create((char*)jump_obj, "jump_id", (void*)iJump, "int");
+        json_create((char*)jump_obj, "jump_en", (void*)((vFpgaGetJump.jump_en >> iJump)&0x01), "int");
+        json_create((char*)jump_obj, "jump_start_freq", (void*)vFpgaGetJump.jump[iJump].jump_start_freq, "int");
+        json_create((char*)jump_obj, "jump_stop_freq", (void*)vFpgaGetJump.jump[iJump].jump_stop_freq, "int");
+        if (iJump != (JUMP_MAX_COUNT-1))
+          strcat(jump_obj, ",");
+        jump_obj += strlen(jump_obj);
       }
+      strcat(jump_obj, "]");
+      json_create((char*)tmp_post_var, "jump", (void*)tmp_get_var, "obj");
 
       /** Составляем JSON для банков */
-      memset((char*)json_banks_obj, 0x00, strlen((char*)json_banks_obj));
-      sprintf((char*)json_banks_obj, "[");
-      struct fpga_cmd_bank cmd_get_bank;
-      cmd_get_jump.bank_cnt = 8;
-      for (int iBank = 0; iBank < cmd_get_jump.bank_cnt; iBank++)
+      char *bank_obj = (char*)tmp_get_var;
+      memset( bank_obj, 0x00, NET_TEMP_GET_HANDL_SIZE );
+      sprintf((char*)bank_obj, "[");
+      bank_obj++;
+
+      if((vFpgaGetJump.bank_cnt == 0) || (vFpgaGetJump.bank_cnt > 1024))
+         vFpgaGetJump.bank_cnt = 8;
+
+      for (int iBank = 0; iBank < vFpgaGetJump.bank_cnt; iBank++)
       {
         /** Запрос банка у возбудителя */
         FPGA_getBank(can_id, num_sublit, mode, submode, iBank);
         /** Дожидаемся ответа */
-        if (xQueueReceive(GetBank_Queue, &(cmd_get_bank), pdMS_TO_TICKS(500)) == pdTRUE)
+        if ( xSemaphoreTake( smpr_VzBankGet, pdMS_TO_TICKS(500)) != pdTRUE )
         {
-          for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
+          FPGA_getBank(can_id, num_sublit, mode, submode, iBank);
+          if ( xSemaphoreTake( smpr_VzBankGet, pdMS_TO_TICKS(500)) != pdTRUE )
+            return NULL;
+        }
+
+        for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
+        {
+          if (can_id == letters_store[iVz].SELF_CAN_ID)
           {
-            if (can_id == letters_store[iVz].SELF_CAN_ID)
-            {
-              Manage_reCalcBanksDDS(&cmd_get_bank.bank, &letters_store[iVz], num_sublit);
-            }
-          }
-          /** Заполняем JSON */
-          char __IO *bank = (char __IO*)(0xC0500000);
-          //if (bank != NULL)
-          {
-            memset((char*)bank, 0x00, 256);
-            json_create((char*)bank, "bank_id", (void*)cmd_get_bank.bank_num, "int");
-            json_create((char*)bank, "start_freq", (void*)cmd_get_bank.bank.start_freq, "int");
-            json_create((char*)bank, "stop_freq", (void*)cmd_get_bank.bank.stop_freq, "int");
-            json_create((char*)bank, "step_freq", (void*)cmd_get_bank.bank.step_freq, "int");
-            json_create((char*)bank, "step_mask", (void*)cmd_get_bank.bank.step_mask, "int");
-            json_create((char*)bank, "run_mask", (void*)cmd_get_bank.bank.run_mask, "int");
-            json_create((char*)bank, "phase_in", (void*)((int)cmd_get_bank.bank.phase_in), "int");
-            json_create((char*)bank, "next_bank", (void*)((int)cmd_get_bank.bank.next_bank), "int");
-            json_create((char*)bank, "phase_toggle_step", (void*)((int)cmd_get_bank.bank.phase_toggle_step), "int");
-            json_create((char*)bank, "flags_bank", (void*)((int)cmd_get_bank.bank.flags_bank), "int");
-            json_create((char*)bank, "base_lsfr_polynome", (void*)((int)cmd_get_bank.bank.base_lsfr_polynome), "int");
-            json_create((char*)bank, "hight_step_lsfr_polynome", (void*)((int)cmd_get_bank.bank.hight_step_lsfr_polynome), "int");
-            json_create((char*)bank, "hight_run_lsfr_polynome", (void*)((int)cmd_get_bank.bank.hight_run_lsfr_polynome), "int");
-            strcat((char*)json_banks_obj, (char*)bank);
-            if (iBank != (cmd_get_jump.bank_cnt-1))
-              strcat((char*)json_banks_obj, ",");
-            //vPortFree(bank);
+            VZ_reCalcBanksDDS( &vFpgaGetBank.bank, &letters_store[iVz], num_sublit );
           }
         }
+        json_create((char*)bank_obj, "bank_id", (void*)vFpgaGetBank.bank_num, "int");
+        json_create((char*)bank_obj, "start_freq", (void*)vFpgaGetBank.bank.start_freq, "int");
+        json_create((char*)bank_obj, "stop_freq", (void*)vFpgaGetBank.bank.stop_freq, "int");
+        json_create((char*)bank_obj, "step_freq", (void*)vFpgaGetBank.bank.step_freq, "int");
+        json_create((char*)bank_obj, "step_mask", (void*)vFpgaGetBank.bank.step_mask, "int");
+        json_create((char*)bank_obj, "run_mask", (void*)vFpgaGetBank.bank.run_mask, "int");
+        json_create((char*)bank_obj, "phase_in", (void*)((int)vFpgaGetBank.bank.phase_in), "int");
+        json_create((char*)bank_obj, "next_bank", (void*)((int)vFpgaGetBank.bank.next_bank), "int");
+        json_create((char*)bank_obj, "phase_toggle_step", (void*)((int)vFpgaGetBank.bank.phase_toggle_step), "int");
+        json_create((char*)bank_obj, "flags_bank", (void*)((int)vFpgaGetBank.bank.flags_bank), "int");
+        json_create((char*)bank_obj, "bank_rpt", (void*)((int)vFpgaGetBank.bank.bank_rpt), "int");
+        json_create((char*)bank_obj, "freq_rate", (void*)((int)vFpgaGetBank.bank.freq_rate), "int");
+        json_create((char*)bank_obj, "step_freq_accel", (void*)((int)vFpgaGetBank.bank.step_freq_accel), "int");
+        if (iBank != (vFpgaGetJump.bank_cnt-1))
+          strcat((char*)bank_obj, ",");
+        bank_obj += strlen(bank_obj);
       }
-      strcat((char*)json_banks_obj, "]");
-      json_create((char*)json_dump, "banks", (void*)json_banks_obj, "obj");
+      strcat((char*)bank_obj, "]");
+
+      xSemaphoreGive( mtx_BlockStateRequest );
     }
-    return (char*)json_dump;
+    json_create((char*)tmp_post_var, "banks", (void*)tmp_get_var, "obj");
+    return tmp_post_var;
   }
-  else if ( (strcmp(url, "api/save-amp") == 0) || (strcmp(url, "api/set-amp") == 0) )
+
+  /** Изменение настроек возбудителей */
+  else if ( strstr(url, "api/vz-settings") != NULL )
   {
-    uint16_t cmd = 0;
-    if (strcmp(url, "api/save-amp") == 0)
-      cmd = CMD_BANK_WRITE;
-    else if (strcmp(url, "api/set-amp") == 0)
-      cmd = CMD_BANK_SET;
-    cmd_amp.cmd = cmd;
-
-    uint32_t can_id = 0;
-    uint32_t num_sublit = 0;
-    printf("SAVE AMP --> JSON Get CAN_ID\n");
-    json_get(json, "can_id", (void*)&can_id);
-    printf("SAVE AMP --> JSON Get Sublit\n");
-    json_get(json, "num_sublit", (void*)&num_sublit);
-
-    printf("SAVE AMP --> Stop Ramp\n");
-    /** Останавливаем рампу */
-    FPGA_sendCmd(can_id, num_sublit, CMD_RAMP_OFF, CMD_VOZB_STOP_RAMP);
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
+    if (xSemaphoreTake( mtx_BlockStateRequest, pdMS_TO_TICKS(500) ) == pdTRUE)
     {
-      FPGA_sendCmd(can_id, num_sublit, CMD_RAMP_OFF, CMD_VOZB_STOP_RAMP);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
+      int can_id = 0, tmp = 0;
+      json_get(json, "can_id", (void*)&can_id);
+
+      for (int iVz = 0; iVz < letters_cnt; iVz++)
+      {
+        if (letters_store[iVz].SELF_CAN_ID == can_id)
+        {
+          json_get(json, "start_freq", (void*)&letters_store[iVz].StartFreq);
+          json_get(json, "stop_freq", (void*)&letters_store[iVz].StopFreq);
+          json_get(json, "synth_freq", (void*)&letters_store[iVz].SynthFreq);
+          json_get(json, "multisignal_allow", (void*)&tmp);
+          letters_store[iVz].multisignal_allow = (uint8_t)tmp;
+
+          char* tmp_name = (char *)(tmp_get_var);
+          for (int iSub = 0; iSub < letters_store[iVz].SublitCnt; iSub++)
+          {
+            memset((char*)tmp_name, 0x00, 32);
+            sprintf((char*)tmp_name, "start_freq_sub%d", (iSub+1));
+            json_get(json, (char*)tmp_name, (void*)&letters_store[iVz].SubLit[iSub].StartFreq);
+
+            memset((char*)tmp_name, 0x00, 32);
+            sprintf((char*)tmp_name, "stop_freq_sub%d", (iSub+1));
+            json_get(json, (char*)tmp_name, (void*)&letters_store[iVz].SubLit[iSub].StopFreq);
+            
+            memset((char*)tmp_name, 0x00, 32);
+            sprintf((char*)tmp_name, "phase_toggle_allow%d", (iSub+1));
+            json_get(json, (char*)tmp_name, (void*)&letters_store[iVz].SubLit[iSub].phase_toggle_allow);
+
+            sprintf((char*)tmp_name, "pwr_sub%d", (iSub+1));
+            char *p = strstr(json, (char*)tmp_name);
+            if (p != NULL)
+            {
+              p += strlen((char*)tmp_name) + 2;
+              char *end;
+              letters_store[iVz].SubLit[iSub].PowerTreshhold = strtod(p, &end);
+            }
+          }
+
+          VZ_SetStore( &letters_store[iVz] );
+          //VZ_RequestStore();
+        }
+      }
+      xSemaphoreGive( mtx_BlockStateRequest );
     }
 
-    /** Получаем из JSON значения амплитуд и частот */
-    char __IO *pArr = (char __IO*)(0xC0500000);
-    printf("SAVE AMP --> Get amplitude managment\n");
-    //if (pArr != NULL)
+    json_create((char*)tmp_post_var, "token", (void*)(webworker.token), "string");
+    return tmp_post_var;
+  }
+  else if ( (strstr(url, "api/save-amp") != NULL) || (strstr(url, "api/set-amp") != NULL) )
+  {
+    if (xSemaphoreTake( mtx_BlockStateRequest, pdMS_TO_TICKS(500) ) == pdTRUE)
     {
+      uint16_t cmd = 0;
+      if (strcmp(url, "api/save-amp") == 0)
+        cmd = CMD_BANK_WRITE;
+      else if (strcmp(url, "api/set-amp") == 0)
+        cmd = CMD_BANK_SET;
+      cmd_amp.cmd = cmd;
+
+      uint32_t can_id = 0;
+      uint32_t num_sublit = 0;
+      uint32_t temp = 0;
+      json_get(json, "can_id", (void*)&can_id);
+      json_get(json, "num_sublit", (void*)&num_sublit);
+
+      /** Останавливаем рампу */
+      for(int i = 0; i < 5; i++)
+      {
+        FPGA_sendCmd(can_id, num_sublit, CMD_RAMP_OFF, CMD_VOZB_STOP_RAMP);
+        if (VZ_WaitOkResponse() == ERROR_NONE)
+          break;
+      }
+
+      /** Получаем из JSON значения амплитуд и частот */
+      char *pArr = (char *)(tmp_get_var);
+
       memset((char*)pArr, 0x00, 128);
       char *ampset = strstr(json, "amp\":");
       ampset = ampset+strlen("amp\":");
       strcpy((char*)pArr, ampset);
       char *ppArr = (char*)pArr;
       int tmp = 0;
+
       for (int iAmp = 0; iAmp < AMP_MAX_COUNT*AMP_SET_COUNT; iAmp++)
       {
-        char *obj = strtok(ppArr, "}");
+        char *obj = strstr(ppArr, "{");
         if (obj != NULL)
         {
           json_get(obj, "amp_start_freq", (void*)&cmd_amp.amp[iAmp].amp_start_freq);
-          json_get(obj, "amp_in", (void*)&tmp);
-          cmd_amp.amp[iAmp].amp_in = (uint16_t)tmp;
+
+          char *amp_in = strstr(obj, "amp_in");
+          amp_in = strstr(amp_in, ":") + 1;
+          char *end = NULL;
+          amplitude[iAmp] = strtof(amp_in, &end);
+
           json_get(obj, "att_in", (void*)&tmp);
           cmd_amp.amp[iAmp].att_in = (uint16_t)tmp;
         }
@@ -811,251 +457,43 @@ static char *POST_Handler(char *url, char *json, struct webworker *web)
         {
           break;
         }
-        ppArr += strlen(obj)+1;
+        ppArr = strstr(ppArr, "}") + 1;
       }
-    }
-    printf("SAVE AMP --> Recalc amplitude\n");
-    /** Пересчитываем в коды DDS */
-    for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
-    {
-      if (can_id == letters_store[iVz].SELF_CAN_ID)
+      
+      /** Пересчитываем в коды DDS */
+      for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
       {
-        Manage_calcAmpsDDS(cmd_amp.amp, &letters_store[iVz], (uint8_t)num_sublit);
-        break;
+        if (can_id == letters_store[iVz].SELF_CAN_ID)
+        {
+          VZ_calcAmpsDDS(cmd_amp.amp, amplitude, &letters_store[iVz], (uint8_t)num_sublit);
+          break;
+        }
       }
-    }
 
-    printf("SAVE AMP --> Send amplitude to vozb\n");
-    /** Отправка амплитуд в возбудитель */
-    FPGA_setAmp(&cmd_amp, can_id, num_sublit);
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-    {
-      FPGA_setAmp(&cmd_amp, can_id, num_sublit);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-    }
-    /** Включение рампы */
-    printf("SAVE AMP --> Enable Ramp\n");
-    FPGA_changeMode(can_id, num_sublit, device_info.mode_vz, 0);
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-    {
-      FPGA_changeMode(can_id, num_sublit, device_info.mode_vz, 0);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-    }
-
-    printf("return post netcon from handler\n");
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if ( strcmp(url, "api/erase-sector-vz") == 0 )
-  {
-    uint32_t address = 0, can_id = 0, num_sublit = 0;
-    json_get(json, "can_id", (void*)&can_id);
-    json_get(json, "num_sublit", (void*)&num_sublit);
-    json_get(json, "address", (void*)&address);
-    FPGA_eraseSector(address, can_id, num_sublit);
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-    {
-      printf("--> Erase Sector FPGA TIMEOUT\n");
-      FPGA_eraseSector(address, can_id, num_sublit);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-    }
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if ( strcmp(url, "api/flash-page-vz") == 0 )
-  {
-    int can_id = 0, num_sublit = 0;
-    json_get(json, "can_id", (void*)&can_id);
-    json_get(json, "num_sublit", (void*)&num_sublit);
-    json_get(json, "address", (void*)&page.address);
-
-    char __IO *pArr = (char __IO*)(0xC0500000);
-    memset((char*)pArr, 0x00, 128);
-    char *page_arr = strstr(json, "page\":");
-    page_arr = page_arr+strlen("page\":")+1;
-    strcpy((char*)pArr, page_arr);
-    char *ppArr = (char*)pArr;
-    char *pNum = NULL;
-    for (int i = 0; i < 256; i++)
-    {
-      pNum = strtok((char*)ppArr, ",");
-      if (pNum == NULL)
-        break;
-      page.page[i] = (uint8_t)atoi(pNum);
-      ppArr += strlen(pNum)+1;
-    }
-    FPGA_programPage(&page, can_id, num_sublit);
-    if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-    {
-      printf("--> Program page FPGA TIMEOUT\n");
-      FPGA_programPage(&page, can_id, num_sublit);
-      xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-    }
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if ( strcmp(url, "api/vz-settings") == 0 )
-  {
-    int can_id = 0;
-    json_get(json, "can_id", (void*)&can_id);
-    SysPkg_Typedef response;
-
-    for (int iVz = 0; iVz < _crnt_letters_cnt; iVz++)
-    {
-      if (letters_store[iVz].SELF_CAN_ID == can_id)
+      /** Отправка амплитуд в возбудитель */
+      for(int i = 0; i < 5; i++)
       {
-        json_get(json, "start_freq", (void*)&letters_store[iVz].StartFreq);
-        json_get(json, "stop_freq", (void*)&letters_store[iVz].StopFreq);
-        json_get(json, "synth_freq", (void*)&letters_store[iVz].SynthFreq);
-        json_get(json, "ext_osk_en", (void*)&letters_store[iVz].signal_mod);
-        
-        letters_store[iVz].StartFreq = letters_store[iVz].StartFreq / 1000;
-        letters_store[iVz].StopFreq = letters_store[iVz].StopFreq / 1000;
-
-        for (int iSub = 0; iSub < letters_store[iVz].SublitCnt; iSub++)
-        {
-          letters_store[iVz].SubLit[iSub].StartFreq = letters_store[iVz].SubLit[iSub].StartFreq / 1000;
-          letters_store[iVz].SubLit[iSub].StopFreq = letters_store[iVz].SubLit[iSub].StopFreq / 1000;
-        }
-
-        response = Utils_CmdCreate(letters_store[iVz].SELF_CAN_ID, SELF_NET_ID, CMD_VOZB_SET_STORE,
-                                   sizeof(SysPkg_Typedef)+sizeof(struct litera_store), (uint8_t*)&letters_store[iVz], false, 0, 0);
-        FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&response, sizeof(SysPkg_Typedef));
-        FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&letters_store[iVz], sizeof(struct litera_store));
-
-        if (xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500)) != pdTRUE)
-        {
-          printf("--> CMD_VOZB_SET_STORE Timeout Error\n");
-          FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&response, sizeof(SysPkg_Typedef));
-          FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&letters_store[iVz], sizeof(struct litera_store));
-          xSemaphoreTake(CanHttpOk_Semaphore, pdMS_TO_TICKS(500));
-        }
-        
-        letters_store[iVz].StartFreq = letters_store[iVz].StartFreq * 1000;
-        letters_store[iVz].StopFreq = letters_store[iVz].StopFreq * 1000;
-
-        for (int iSub = 0; iSub < letters_store[iVz].SublitCnt; iSub++)
-        {
-          letters_store[iVz].SubLit[iSub].StartFreq = letters_store[iVz].SubLit[iSub].StartFreq * 1000;
-          letters_store[iVz].SubLit[iSub].StopFreq = letters_store[iVz].SubLit[iSub].StopFreq * 1000;
-        }
-        
-        for (int iVz = 0; iVz < MAX_VZ_CNT; iVz++)
-        {
-          response = Utils_CmdCreate(NET_ID_VOZB_1+iVz, SELF_NET_ID, CMD_VOZB_GET_STORE,
-                                                   sizeof(SysPkg_Typedef), NULL, false, 0, 0);
-          FDCAN_SendBigData(&hfdcan1, SELF_NET_ID, (uint8_t*)&response, sizeof(SysPkg_Typedef));
-          osDelay(100);
-        }
-        break;
+        FPGA_setAmp(&cmd_amp, can_id, num_sublit);
+        if (VZ_WaitOkResponse() == ERROR_NONE)
+          break;
       }
-    }
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if ( strcmp(url, "api/save-net") == 0 )
-  {
-    if (strcmp(web->crnt_user, "admin") == 0)
-    {
-      json_get(json, "hash", (void*)device_info.admin_hash);
-    }
-    else if (strcmp(web->crnt_user, "user") == 0)
-    {
-      json_get(json, "hash", (void*)device_info.user_hash);
-    }
 
-    char __IO *tmp_ip = (char __IO*)(0xC0500000);
-    memset((char*)tmp_ip, 0x00, 128);
-
-    json_get(json, "ipaddr", (void*)tmp_ip);
-    convert_ip((char*)tmp_ip, device_info.ipaddr);
-
-    json_get(json, "netmask", (void*)tmp_ip);
-    convert_ip((char*)tmp_ip, device_info.netmask);
-
-    CSP_QUADSPI_Init();
-    uint32_t address = (QSPI_DEV_ADDRESS-QSPI_START_ADDRESS);
-    if (CSP_QSPI_EraseSector( address, address+sizeof(uint32_t)+sizeof(struct dev_info)) == HAL_OK)
-    {
-      uint32_t synqseq = SYNQSEQ_DEF;
-      CSP_QSPI_WriteMemory((uint8_t*)&synqseq, address, sizeof(uint32_t));
-      CSP_QSPI_WriteMemory((uint8_t*)&device_info, address+sizeof(uint32_t), sizeof(struct dev_info));
-    }
-    CSP_QSPI_EnableMemoryMappedMode();
-
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
-  }
-  else if ( strcmp(url, "api/save-config") == 0 )
-  {
-    char __IO *tmp_mac = (char __IO*)(0xC0500000);
-    memset((char*)tmp_mac, 0x00, 128);
-
-    json_get(json, "dev_name", (void*)device_info.device_id);
-    json_get(json, "dev_sn", (void*)device_info.sn);
-    json_get(json, "dev_macaddr", (void*)tmp_mac);
-
-    convert_mac((char*)tmp_mac, device_info.macaddr);
-
-    CSP_QUADSPI_Init();
-    uint32_t address = (QSPI_DEV_ADDRESS-QSPI_START_ADDRESS);
-    if (CSP_QSPI_EraseSector( address, address+sizeof(uint32_t)+sizeof(struct dev_info)) == HAL_OK)
-    {
-      uint32_t synqseq = SYNQSEQ_DEF;
-      CSP_QSPI_WriteMemory((uint8_t*)&synqseq, address, sizeof(uint32_t));
-      CSP_QSPI_WriteMemory((uint8_t*)&device_info, address+sizeof(uint32_t), sizeof(struct dev_info));
-    }
-    CSP_QSPI_EnableMemoryMappedMode();
-
-    json_create((char*)json_dump, "token", (void*)(web->token), "string");
-    return (char*)json_dump;
+      /** Включение рампы */
+      for(int i = 0; i < 5; i++)
+      {
+        FPGA_changeMode(can_id, num_sublit, device_status.mode_vz, 0);
+        if (VZ_WaitOkResponse() == ERROR_NONE)
+          break;
+      }
+      
+      xSemaphoreGive( mtx_BlockStateRequest );
+     }
+    json_create((char*)tmp_post_var, "token", (void*)(webworker.token), "string");
+    return tmp_post_var;
   }
 
   return NULL;
 }
 
-/**
- * [convert_ip description]
- * @param str_ip [description]
- * @param out_ip [description]
- */
-static void convert_ip(char *str_ip, uint8_t *out_ip)
-{
-  char *ip;
-  for (int i = 0; i < 4; i++)
-  {
-    if (i == 0)
-      ip = strtok(str_ip, ".");
-    else
-      ip = strtok(NULL, ".");
-    
-    if (ip == NULL)
-      break;
-    out_ip[i] = atoi(ip);
-  }
-  for (int i = 0; i < 100; i++) str_ip[i] = 0;
-}
-
-/**
- * [convert_mac description]
- * @param str_mac [description]
- * @param out_mac [description]
- */
-static void convert_mac(char *str_mac, uint8_t *out_mac)
-{
-  char *mac;
-  char *pEnd;
-  for (int i = 0; i < 6; i++)
-  {
-    if (i == 0)
-      mac = strtok(str_mac, ":");
-    else
-      mac = strtok(NULL, ":");
-
-    if (mac == NULL)
-      break;
-    out_mac[i] = strtol(mac, &pEnd, 16);
-  }
-}
 
 /*************************** END OF FILE ***************************/
