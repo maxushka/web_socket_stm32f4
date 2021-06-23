@@ -8,25 +8,26 @@
 extern struct   litera_store letters_store[MAX_VZ_CNT];
 extern uint8_t  letters_cnt;
 extern xSemaphoreHandle mtx_BlockStateRequest;
-
-__IO char *tmp_get_var =  (__IO char*)(NET_TEMP_GET_HANDL_START_ADDR);
-__IO char *tmp_post_var = (__IO char*)(NET_TEMP_POST_HANDL_START_ADDR);
-
-struct fpga_cmd_amp vFpgaGetAmp = {0};
 extern xSemaphoreHandle smpr_VzAmpGet;
-
-struct fpga_cmd_jump vFpgaGetJump = {0};
 extern xSemaphoreHandle smpr_VzJumpGet;
-
-struct fpga_cmd_bank vFpgaGetBank = {0};
 extern xSemaphoreHandle smpr_VzBankGet;
 
+#if HH_USE_SDRAM == 1
+  __IO char *tmp_get_var =  (__IO char*)(HH_TEMP_GET_HANDL_START_ADDR);
+  __IO char *tmp_post_var = (__IO char*)(HH_TEMP_POST_HANDL_START_ADDR);
+#else
+  __IO char tmp_get_var[HH_TEMP_GET_HANDL_SIZE] =  {0};
+  __IO char tmp_post_var[HH_TEMP_POST_HANDL_SIZE] = {0};
+#endif
+
+struct fpga_cmd_amp vFpgaGetAmp = {0};
+struct fpga_cmd_jump vFpgaGetJump = {0};
+struct fpga_cmd_bank vFpgaGetBank = {0};
 struct litera_status vLiteraStatus = {0};
 
 float amplitude[AMP_MAX_COUNT*AMP_SET_COUNT] = {0};
 
 char tmp_name[32] = {0};
-char tmp_pwr[8] = {0};
 
 struct fpga_cmd_amp cmd_amp = {
   .sync = SYNC_AMP,
@@ -56,15 +57,15 @@ __IO char* GET_Handler( char *url )
     {
       for (int iSub = 0; iSub < letters_store[iLit].SublitCnt; iSub++)
       {
-        json_create( (char*)pVz, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, "int" );
+        json_create( (char*)pVz, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, jsINT );
         json_create( (char*)pVz, "name", (void*)letters_store[iLit].Name, "string" );
-        json_create( (char*)pVz, "start_freq", (void*)letters_store[iLit].SubLit[iSub].StartFreq, "int" );
-        json_create( (char*)pVz, "stop_freq", (void*)letters_store[iLit].SubLit[iSub].StopFreq, "int" );
-        json_create( (char*)pVz, "num_sublit", (void*)iSub, "int" );
-        json_create( (char*)pVz, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, "int" );
-        json_create( (char*)pVz, "multisignal_allow", (void*)(int)letters_store[iLit].multisignal_allow, "int" );
-        json_create( (char*)pVz, "phase_toggle_allow", (void*)((uint32_t)letters_store[iLit].SubLit[iSub].phase_toggle_allow), "int");
-        json_create( (char*)pVz, "amp", (void*)"[ ]", "obj" );
+        json_create( (char*)pVz, "start_freq", (void*)letters_store[iLit].SubLit[iSub].StartFreq, jsINT );
+        json_create( (char*)pVz, "stop_freq", (void*)letters_store[iLit].SubLit[iSub].StopFreq, jsINT );
+        json_create( (char*)pVz, "num_sublit", (void*)iSub, jsINT );
+        json_create( (char*)pVz, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, jsINT );
+        json_create( (char*)pVz, "multisignal_allow", (void*)(int)letters_store[iLit].multisignal_allow, jsINT );
+        json_create( (char*)pVz, "phase_toggle_allow", (void*)((uint32_t)letters_store[iLit].SubLit[iSub].phase_toggle_allow), jsINT);
+        json_create( (char*)pVz, "amp", (void*)"[ ]", jsARR );
         if ( iLit != letters_cnt-1 )
         {
           strcat( (char*)pVz, "," );
@@ -78,7 +79,7 @@ __IO char* GET_Handler( char *url )
       }
     }
     strcat( (char*)pVz, " ]" );
-    json_create( (char*)tmp_get_var, "vz", (void*)tmp_post_var, "obj" );
+    json_create( (char*)tmp_get_var, "vz", (void*)tmp_post_var, jsARR );
     
     memset((char*)tmp_post_var, 0x00, strlen((char*)tmp_post_var));
     char *vozb_edit_arr = (char *)(tmp_post_var);
@@ -87,42 +88,36 @@ __IO char* GET_Handler( char *url )
 
     for (int iLit = 0; iLit < letters_cnt; iLit++)
     {
-      json_create((char*)vozb_edit_arr, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, "int");
-      json_create((char*)vozb_edit_arr, "name", (void*)letters_store[iLit].Name, "string");
-      json_create((char*)vozb_edit_arr, "sn", (void*)letters_store[iLit].SN, "string");
-      json_create((char*)vozb_edit_arr, "start_freq", (void*)letters_store[iLit].StartFreq, "int");
-      json_create((char*)vozb_edit_arr, "stop_freq", (void*)letters_store[iLit].StopFreq, "int");
-        
+      json_create((char*)vozb_edit_arr, "can_id", (void*)letters_store[iLit].SELF_CAN_ID, jsINT);
+      json_create((char*)vozb_edit_arr, "name", (void*)letters_store[iLit].Name, jsSTRING);
+      json_create((char*)vozb_edit_arr, "sn", (void*)letters_store[iLit].SN, jsSTRING);
+      json_create((char*)vozb_edit_arr, "start_freq", (void*)letters_store[iLit].StartFreq, jsINT);
+      json_create((char*)vozb_edit_arr, "stop_freq", (void*)letters_store[iLit].StopFreq, jsINT);
+      json_create((char*)vozb_edit_arr, "synth_freq", (void*)letters_store[iLit].SynthFreq, jsINT);
+      json_create((char*)vozb_edit_arr, "multisignal_allow", (void*)((uint32_t)letters_store[iLit].multisignal_allow), jsINT);
+      json_create((char*)vozb_edit_arr, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, jsINT);
+
       for (int iSub = 0; iSub < letters_store[iLit].SublitCnt; iSub++)
       {
-        memset((char*)tmp_name, 0x00, 32);
-        sprintf((char*)tmp_name, "start_freq_sub%d", (iSub+1));
-        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)letters_store[iLit].SubLit[iSub].StartFreq, "int");
-          
-        memset((char*)tmp_name, 0x00, 32);
-        sprintf((char*)tmp_name, "stop_freq_sub%d", (iSub+1));
-        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)letters_store[iLit].SubLit[iSub].StopFreq, "int");
+        sprintf((char*)tmp_name, "start_freq_sub%d\0", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)letters_store[iLit].SubLit[iSub].StartFreq, jsINT);
 
-        memset((char*)tmp_name, 0x00, 32);
-        sprintf((char*)tmp_name, "phase_toggle_allow%d", (iSub+1));
-        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)((int)letters_store[iLit].SubLit[iSub].phase_toggle_allow), "int");
+        sprintf((char*)tmp_name, "stop_freq_sub%d\0", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)letters_store[iLit].SubLit[iSub].StopFreq, jsINT);
 
-        memset((char*)tmp_name, 0x00, 32);
-        sprintf((char*)tmp_name, "pwr_sub%d", (iSub+1));
-        memset((char*)tmp_pwr, 0x00, 8);
-        sprintf((char*)tmp_pwr, "%.1f", letters_store[iLit].SubLit[iSub].PowerTreshhold);
-        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)tmp_pwr, "obj");
+        sprintf((char*)tmp_name, "phase_toggle_allow%d\0", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)((int)letters_store[iLit].SubLit[iSub].phase_toggle_allow), jsINT);
+
+        sprintf((char*)tmp_name, "pwr_sub%d\0", (iSub+1));
+        json_create((char*)vozb_edit_arr, (char*)tmp_name, (void*)&letters_store[iLit].SubLit[iSub].PowerTreshhold, jsFLOAT);
       }
 
-      json_create((char*)vozb_edit_arr, "synth_freq", (void*)letters_store[iLit].SynthFreq, "int");
-      json_create((char*)vozb_edit_arr, "multisignal_allow", (void*)((uint32_t)letters_store[iLit].multisignal_allow), "int");
-      json_create((char*)vozb_edit_arr, "sublit_cnt", (void*)letters_store[iLit].SublitCnt, "int");
       if ( iLit != letters_cnt-1 )
         strcat((char*)vozb_edit_arr, ",");
       vozb_edit_arr += strlen(vozb_edit_arr);
     }
     strcat((char*)vozb_edit_arr, "]");
-    json_create((char*)tmp_get_var, "vozb_edit", (void*)tmp_post_var, "obj");
+    json_create((char*)tmp_get_var, "vozb_edit", (void*)tmp_post_var, jsARR);
   }
   
   else if (strstr(url, "api/state-vz") != NULL)
@@ -139,7 +134,7 @@ __IO char* GET_Handler( char *url )
 
         for (int iSub = 0; iSub < letters_store[iVz].SublitCnt; ++iSub)
         {
-          json_create((char*)vz_state_obj, "name", (void*)letters_store[iVz].Name, "string");
+          json_create((char*)vz_state_obj, "name", (void*)letters_store[iVz].Name, jsSTRING);
           json_create((char*)vz_state_obj, "can_id", (void*)vLiteraStatus.SELF_CAN_ID, "int");
           json_create((char*)vz_state_obj, "num_sublit", (void*)iSub, "int");
           json_create((char*)vz_state_obj, "start_freq", (void*)letters_store[iVz].SubLit[iSub].StartFreq, "int");
