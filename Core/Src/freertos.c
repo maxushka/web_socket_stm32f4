@@ -26,6 +26,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "rng.h"
 #include "http.h"
 #include "websocket.h"
 /* USER CODE END Includes */
@@ -107,7 +108,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* definition and creation of MainTask */
-  osThreadDef(MainTask, thread_MainTask, osPriorityNormal, 0, 512);
+  osThreadDef(MainTask, thread_MainTask, osPriorityNormal, 0, 128);
   MainTaskHandle = osThreadCreate(osThread(MainTask), NULL);
 
   /* definition and creation of SecondTask */

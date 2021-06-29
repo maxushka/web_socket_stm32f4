@@ -32,12 +32,14 @@ web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma_ex.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_cortex.h
+web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_can.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_eth.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
+web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rng.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 web_socket_stm32f4\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 web_socket_stm32f4\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
@@ -46,7 +48,8 @@ web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/includ
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
-web_socket_stm32f4\freertos.o: ../Core/Inc/net.h
+web_socket_stm32f4\freertos.o: ../Core/Inc/rng.h
+web_socket_stm32f4\freertos.o: ../Core/Inc/http.h
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/LwIP/src/include/lwip/opt.h
 web_socket_stm32f4\freertos.o: ../LWIP/Target/lwipopts.h
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/LwIP/src/include/lwip/debug.h
@@ -72,3 +75,5 @@ web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/LwIP/system/arch/sys_a
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h
 web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h
 web_socket_stm32f4\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdbool.h
+web_socket_stm32f4\freertos.o: ../Core/Inc/websocket.h
+web_socket_stm32f4\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h

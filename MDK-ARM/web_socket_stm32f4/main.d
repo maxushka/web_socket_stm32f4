@@ -23,12 +23,14 @@ web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_ext
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma_ex.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_cortex.h
+web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_can.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_eth.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
+web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rng.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 web_socket_stm32f4\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 web_socket_stm32f4\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
@@ -46,8 +48,10 @@ web_socket_stm32f4\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/ti
 web_socket_stm32f4\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
 web_socket_stm32f4\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
 web_socket_stm32f4\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
+web_socket_stm32f4\main.o: ../Core/Inc/can.h
 web_socket_stm32f4\main.o: ../MBEDTLS/App/mbedtls.h
 web_socket_stm32f4\main.o: ../MBEDTLS/App/mbedtls_config.h
 web_socket_stm32f4\main.o: ../Middlewares/Third_Party/mbedTLS/include/mbedtls/check_config.h
 web_socket_stm32f4\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
+web_socket_stm32f4\main.o: ../Core/Inc/rng.h
 web_socket_stm32f4\main.o: ../Core/Inc/gpio.h

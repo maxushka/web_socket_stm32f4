@@ -337,7 +337,7 @@
               <MiscControls></MiscControls>
               <Define>MBEDTLS_CONFIG_FILE=&lt;mbedtls_config.h&gt;,USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;        ../LWIP/App;        ../LWIP/Target;        ../MBEDTLS/App;        ../Middlewares/Third_Party/LwIP/src/include;        ../Middlewares/Third_Party/LwIP/system;        ../Middlewares/Third_Party/mbedTLS/include;        ../Drivers/STM32F4xx_HAL_Driver/Inc;        ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;        ../Middlewares/Third_Party/FreeRTOS/Source/include;        ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;        ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;        ../Middlewares/Third_Party/LwIP/src/include/netif/ppp;        ../Drivers/CMSIS/Device/ST/STM32F4xx/Include;        ../Middlewares/Third_Party/LwIP/src/include/lwip;        ../Middlewares/Third_Party/LwIP/src/include/lwip/apps;        ../Middlewares/Third_Party/LwIP/src/include/lwip/priv;        ../Middlewares/Third_Party/LwIP/src/include/lwip/prot;        ../Middlewares/Third_Party/LwIP/src/include/netif;        ../Middlewares/Third_Party/LwIP/src/include/compat/posix;        ../Middlewares/Third_Party/LwIP/src/include/compat/posix/arpa;        ../Middlewares/Third_Party/LwIP/src/include/compat/posix/net;        ../Middlewares/Third_Party/LwIP/src/include/compat/posix/sys;        ../Middlewares/Third_Party/LwIP/src/include/compat/stdc;        ../Middlewares/Third_Party/LwIP/system/arch;        ../Middlewares/Third_Party/mbedTLS/include/mbedtls;        ../Drivers/CMSIS/Include</IncludePath>
+              <IncludePath>../Core/Inc;          ../LWIP/App;          ../LWIP/Target;          ../MBEDTLS/App;          ../Middlewares/Third_Party/LwIP/src/include;          ../Middlewares/Third_Party/LwIP/system;          ../Middlewares/Third_Party/mbedTLS/include;          ../Drivers/STM32F4xx_HAL_Driver/Inc;          ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;          ../Middlewares/Third_Party/FreeRTOS/Source/include;          ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;          ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;          ../Middlewares/Third_Party/LwIP/src/include/netif/ppp;          ../Drivers/CMSIS/Device/ST/STM32F4xx/Include;          ../Middlewares/Third_Party/LwIP/src/include/lwip;          ../Middlewares/Third_Party/LwIP/src/include/lwip/apps;          ../Middlewares/Third_Party/LwIP/src/include/lwip/priv;          ../Middlewares/Third_Party/LwIP/src/include/lwip/prot;          ../Middlewares/Third_Party/LwIP/src/include/netif;          ../Middlewares/Third_Party/LwIP/src/include/compat/posix;          ../Middlewares/Third_Party/LwIP/src/include/compat/posix/arpa;          ../Middlewares/Third_Party/LwIP/src/include/compat/posix/net;          ../Middlewares/Third_Party/LwIP/src/include/compat/posix/sys;          ../Middlewares/Third_Party/LwIP/src/include/compat/stdc;          ../Middlewares/Third_Party/LwIP/system/arch;          ../Middlewares/Third_Party/mbedTLS/include/mbedtls;          ../Drivers/CMSIS/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -397,11 +397,6 @@
               <FilePath>..\Core\Src\config.c</FilePath>
             </File>
             <File>
-              <FileName>net.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\net.c</FilePath>
-            </File>
-            <File>
               <FileName>utils.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\utils.c</FilePath>
@@ -420,6 +415,16 @@
               <FileName>freertos.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/freertos.c</FilePath>
+            </File>
+            <File>
+              <FileName>can.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/can.c</FilePath>
+            </File>
+            <File>
+              <FileName>rng.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/rng.c</FilePath>
             </File>
             <File>
               <FileName>stm32f4xx_it.c</FileName>
@@ -550,6 +555,16 @@
               <FileName>stm32f4xx_hal_exti.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_exti.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f4xx_hal_can.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_can.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f4xx_hal_rng.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rng.c</FilePath>
             </File>
             <File>
               <FileName>stm32f4xx_hal_tim.c</FileName>
@@ -1430,6 +1445,16 @@
               <FileName>CMakeLists.txt</FileName>
               <FileType>5</FileType>
               <FilePath>../Middlewares/Third_Party/mbedTLS/include/CMakeLists.txt</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Application/User/MBEDTLS/Target</GroupName>
+          <Files>
+            <File>
+              <FileName>hardware_rng.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../MBEDTLS/Target/hardware_rng.c</FilePath>
             </File>
           </Files>
         </Group>
