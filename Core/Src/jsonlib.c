@@ -1,13 +1,5 @@
 #include "jsonlib.h"
 
-/**
- * Function to get a key value in a JSON string
- * 
- * @param json  - Source JSON string
- * @param key   - Required key
- * @param value - Pointer to a value
- * @param type  - Type of value (refer JsonKeyType_t emun in <jsonlib.h>)
- */
 void json_get( char *json, char *key, void *value, JsonKeyType_t type )
 {
   size_t str_len = 0;
@@ -44,15 +36,6 @@ void json_get( char *json, char *key, void *value, JsonKeyType_t type )
   }
 }
 
-/**
- * Function for creating a JSON string 
- * and adding elements to the existing one
- * 
- * @param json  - Output string
- * @param key   - Key (string parametr)
- * @param value - Pointer to a value
- * @param type  - Type of value (refer JsonKeyType_t emun in <jsonlib.h>)
- */
 void json_create( char *json, char *key, void *value, JsonKeyType_t type )
 {
   char *end = NULL;
@@ -99,4 +82,3 @@ void json_create( char *json, char *key, void *value, JsonKeyType_t type )
   }
 }
 
-/*************************************** END OF FILE **********************************************/
