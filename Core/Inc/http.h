@@ -13,48 +13,54 @@
 #define HTTP_USE_AUTH                     0
 
 /** HTTP Memory sizes configuration ------------------------------------------------------------- */
-#define HTTP_MAX_CONNECTIONS              6
+#define HTTP_MAX_CONNECTIONS              3
 #define HTTP_REQ_URL_BUFF_SIZE            64
-#define HTTP_REQ_DATA_BUFF_SIZE           40960
-#define HTTP_RESP_DATA_BUFF_SIZE          40960
+#define HTTP_REQ_DATA_BUFF_SIZE           4096
+#define HTTP_RESP_DATA_BUFF_SIZE          4096
 #define HTTP_WEBSITE_SIZE                 307200
 
 /** Defining structures ------------------------------------------------------------------------- */
-struct website_file
+typedef struct
 {
   __IO char file_name[64];
   int offset;
   int page_size;
-};
+} httpFile_t;
 
-struct website_file_system
+typedef struct
 {
-  __IO uint8_t *flash_addr;
+  uint8_t *flash_addr;
   uint32_t files_cnt;
-  __IO struct website_file *files;
-};
-
-struct webworker
-{
-  struct website_file_system wsfs;
-  char token[32];
-  char crnt_user[32];
-  char crnt_hash[32];
-  __IO char* (*getHandler) ( char *url );
-  __IO char* (*postHandler) ( char* url, char *json );
-};
+  httpFile_t *files;
+} httpFileSystem_t;
 
 typedef struct 
 {
-  xSemaphoreHandle semaphore;
-  struct netconn *netconn;
-  struct webworker *web;
-  __IO char request_data[HTTP_REQ_DATA_BUFF_SIZE];
-  __IO char resp_js_buff[HTTP_RESP_DATA_BUFF_SIZE];
-  __IO char request_url[HTTP_REQ_URL_BUFF_SIZE];
+  TaskHandle_t task_handle;
+  struct netconn *accepted_sock;
+  void *server_ptr;
+  char request_data[HTTP_REQ_DATA_BUFF_SIZE];
+  char response_data[HTTP_RESP_DATA_BUFF_SIZE];
+  char request_url[HTTP_REQ_URL_BUFF_SIZE];
   uint8_t isopen;
   uint32_t resp_js_buff_len;
-} net_connection;
+} httpConnection_t;
+
+typedef struct
+{
+  httpFileSystem_t file_system;
+#if HTTP_USE_SDRAM == 1
+  httpConnection_t *connections_pool[HTTP_MAX_CONNECTIONS];
+#else
+  httpConnection_t connections_pool[HTTP_MAX_CONNECTIONS];
+#endif
+  
+  char token[32];
+  char crnt_user[32];
+  char crnt_hash[32];
+  char* (*getHandler) ( char *url );
+  char* (*postHandler) ( char* url, char *json );
+} httpServer_t;
 
 /** Addresses HTTP ------------------------------------------------------------------------------ */
 #define HTTP_CONNECTION_START_ADDR       (0xC0000000)
@@ -76,3 +82,10 @@ void    http_server_task       ( void * argument );
 #endif
 
 /*************************************** END OF FILE **********************************************/
+
+
+
+
+
+
+

@@ -20,16 +20,14 @@ static uint8_t*   ws_set_data_to_frame   ( uint8_t *data, uint8_t size, uint8_t 
 
 /**
  * Function of starting a websocket server_ptr and receiving incoming connections.
- * After starting listening on the port, it starts checking for free threads 
- * that can accept an incoming connection. 
  * When the stream of receiving messages is free, 
  * the structure of the received connection is passed to it.
  * 
- * @param argument ws_server_ptr structure (refer websockets.h)
+ * @param arg ws_server_ptr structure (refer websockets.h)
  */
-void ws_server_ptr_task( void * arg )
+void ws_server_task( void * arg )
 {
-  ws_server_ptr_t *ws = (ws_server_ptr_t*)arg;
+  ws_server_t *ws = (ws_server_t*)arg;
   ws_client_t *new_client;
 
   struct netconn *ws_con = netconn_new(NETCONN_TCP);
@@ -68,31 +66,30 @@ void ws_server_ptr_task( void * arg )
   }
 }
 
-static void ws_init_client_structs( struct ws_server_ptr *ws )
+static void ws_init_client_structs( ws_server_t *ws )
 {
-  struct ws_client *wscl;
+  ws_client_t *client;
 
   ws->connected_clients_cnt = 0;
   for (int i = 0; i < NET_WS_MAX_CLIENTS; ++i)
   {
-    wscl = &ws->ws_clients[i];
-    memset((void*)(wscl), 0x00, sizeof(struct ws_client));
-    wscl->server_ptr = (void*)ws;
-    xTaskCreate( ws_client_task, "ws_client", 256, (void*)wscl, 
-                 osPriorityNormal, &wscl->task_handle );
+    client = &ws->ws_clients[i];
+    memset((void*)(client), 0x00, sizeof(struct ws_client));
+    client->server_ptr = (void*)ws;
+    xTaskCreate( ws_client_task, "ws_client", 256, (void*)client, 
+                 osPriorityNormal, &client->task_handle );
   }
 }
 
 
 static void ws_client_task( void * arg )
 {
-  struct ws_client *client = (struct ws_client*)arg;
-  struct ws_server_ptr *server_ptr = (struct ws_server_ptr*)client->server_ptr;
+  ws_client_t *client = (ws_client_t*)arg;
+  ws_server_t *server_ptr = (ws_server_t*)client->server_ptr;
   
   struct netbuf *inbuf = NULL;
-
   uint16_t size_inbuf = 0;
-  char *inbuf_ptr = NULL;
+  uint8_t *inbuf_ptr = NULL;
 
   for (;;)
   {
@@ -107,12 +104,12 @@ static void ws_client_task( void * arg )
       memset(client->recv_buf, 0x00, WS_CLIENT_RECV_BUFFER_SIZE);
       netbuf_data(inbuf, (void**)&inbuf_ptr, &size_inbuf);
       memcpy(client->recv_buf, (void*)inbuf_ptr, size_inbuf);
-      inbuf_ptr = (char*)client->recv_buf;
+      inbuf_ptr = client->recv_buf;
 
       // If is handshake
-      if (strncmp(inbuf_ptr, "GET /", 5) == 0)
+      if (strncmp((char*)inbuf_ptr, "GET /", 5) == 0)
       {
-        char *ws_key_accept = create_ws_key_accept( inbuf_ptr );
+        char *ws_key_accept = create_ws_key_accept( (char*)inbuf_ptr );
         sprintf((char*)server_ptr->send_buf, "%s%s%s", head_ws, 
                                                    ws_key_accept, 
                                                    "\r\n\r\n");
