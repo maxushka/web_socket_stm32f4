@@ -1,26 +1,24 @@
 #include "http.h"
 
 
-char *head_js_resp = "HTTP/1.1 200 OK\n\
+const char *HEADER_OK_RESPONSE = "HTTP/1.1 200 OK\nConnection: close\r\n\r\n";
+const char *HEADER_FORBIDDEN_RESPONSE = "HTTP/1.1 403 Forbidden\r\n\r\n";
+const char *HEADER_NOT_FOUND_RESPOSE = "HTTP/1.1 404 Not Found\r\n\r\n";
+const char *HEADER_JSON_RESPONSE = "HTTP/1.1 200 OK\n\
 Connection: close\n\
 Access-Control-Allow-Origin: *\n\
-Content-Type: application/json; charset=utf-8\n\n";
+Content-Type: application/json; charset=utf-8\nn";
 
-char *head_ok_resp = "HTTP/1.1 200 OK\nConnection: close\r\n\r\n";
-char *head_not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
-
-int json_input_size = 0;
-uint32_t ErrContent = 0;
-
-static uint8_t        create_receive_threads ( void );
-static uint8_t        cmp_cookie_token       ( char *pBuffer, char *token );
-static void           http_receive_handler   ( void * argument );
-static unsigned char *find_request_content   ( char *request, 
-                                               struct website_file_system *wsfs, 
-                                               size_t *ret_size );
-static void           send_file_response     ( char *file_name, 
-                                               struct netconn *con, 
-                                               struct website_file_system *wsfs );
+static void     create_tasks_for_connections( httpServer_t *server );
+static void     http_request_handler( void * arg );
+static uint8_t  check_authorization( char *request, char *token );
+static char*    get_request_url( char *inbuf );
+static uint8_t  is_page_request( char *url );
+static char*    get_page_content( char *page_name, httpFileSystem_t *fs, uint32_t *page_size );
+static char*    find_page( char *page_name, httpFileSystem_t *fs, uint32_t *page_size );
+static int      get_content_length( char *inbuf );
+static void     get_full_request_body( httpConnection_t *con, int content_len );
+static char*    get_content_pointer( char *inbuf );
 
 
 uint8_t http_create_filesystem( httpFileSystem_t *fs )
@@ -116,7 +114,7 @@ static void http_request_handler( void * arg )
   struct netbuf *inbuf = NULL;
   char *inbuf_ptr = NULL;
   uint16_t buflen = 0;
-  uint8_t isAuth = 0;
+  uint8_t is_authorized = 0;
   char tmp_url[HTTP_REQ_URL_BUFF_SIZE] = "";
 
   for(;;)
@@ -127,153 +125,105 @@ static void http_request_handler( void * arg )
 
     if (netconn_recv(connection->accepted_sock, &inbuf) == ERR_OK)
     {
-      inbuf_ptr = NULL;
       netbuf_data(inbuf, (void**)&inbuf_ptr, &buflen);
-      memcpy((char*)connection->request_data, (char*)inbuf_ptr, buflen);
+      memcpy(connection->request_data, inbuf_ptr, buflen);
       inbuf_ptr = connection->request_data;
+      memset(connection->response_data, 0, HTTP_RESP_DATA_BUFF_SIZE);
 
-#if NET_USE_AUTH == 1
-      /** Check user authorization */
-      isAuth = compare_token(inbuf_ptr, server_ptr->token);
-#else
-      isAuth = 1;
-#endif
+      is_authorized = check_authorization(inbuf_ptr, server_ptr->token);
+      char *url = get_request_url(inbuf_ptr);
+      char *response = connection->response_data;
 
-      /** If this is a GET request */
+      // If this is a GET request
       if (strncmp((char*)inbuf_ptr, "GET /", 5) == 0)
       {
-        char *response = connection->response_data;
-        char *url = get_request_url(inbuf_ptr, "GET");
         if (is_page_request(url))
         {
-          // fixit !!!
-          response = get_page_content(url, site, isAuth);
+          if (!is_authorized && strstr(url, "html"))
+            url = "auth.html";
+          response = get_page_content(url, server_ptr->file_system, size);
         }
         else
         {
-          memset((char*)connection->resp_js_buff, 0, HTTP_RESP_DATA_BUFF_SIZE);
-          GETHandler(url, buffer);
-        }
-        netconn_write(response);
-//-------------------------------------------------------------------------------------------------
-
-        inbuf_ptr += strlen("GET ");
-        /** Get the page name */
-        memcpy(tmp_url, (void*)inbuf_ptr, HTTP_REQ_URL_BUFF_SIZE);
-        char *pPage = strtok(tmp_url, " ");
-
-        if (strcmp(pPage, "/") == 0)
-          strncpy((char*)connection->request_url, "index.html", HTTP_REQ_URL_BUFF_SIZE);
-        else
-          strncpy((char*)connection->request_url, pPage+1, HTTP_REQ_URL_BUFF_SIZE);
-
-        /* If the request does not start with .api, 
-         * then this is a page request */
-        if (strstr((char*)connection->request_url, "api") == NULL)
-        {
-          if (isAuth == 0)
-            if (strstr((char*)connection->request_url, "html") != NULL)
-              sprintf((char*)connection->request_url, "auth.html");
-          /** Search for file name in structure website_file_system and send to socket */
-          send_file_response( (char*)connection->request_url, connection->accepted_sock, &connection->web->wsfs );
-        }
-        /** If this is a custom GET request */
-        else
-        {
-          /** Call the GET request callback and receive response content */
-          __IO char* response = connection->web->getHandler( (char*)connection->request_url );
-          
-          /** Make full response string */
-          memset((char*)connection->resp_js_buff, 0, HTTP_RESP_DATA_BUFF_SIZE);
-          strcat((char*)connection->resp_js_buff, head_js_resp);
-          strcat((char*)connection->resp_js_buff, (char*)response);
-          netconn_write(connection->accepted_sock, (char*)connection->resp_js_buff, 
-                        strlen((char*)connection->resp_js_buff), NETCONN_NOCOPY);
-          osDelay(10);
-        }
-      }
-      /** If this is a POST request */
-      else if( (strncmp((char*)inbuf_ptr, "POST /", 6) == 0) )
-      {
-        struct netbuf *in;
-        char *url = (char*)connection->request_data + strlen("POST ");
-
-        sdram_memcpy(tmp_url, url, HTTP_REQ_URL_BUFF_SIZE);
-        url = strtok(tmp_url, " ");
-        strncpy((char*)connection->request_url, url+1, HTTP_REQ_URL_BUFF_SIZE);
-        url = (char*)connection->request_url;
-
-        /** Search content length of request data */
-        char *pContLen = strstr((char*)connection->request_data, "Content-Length: ");
-        pContLen = pContLen+strlen("Content-Length: ");
-        json_input_size = strtol((char*)pContLen, NULL, 10);
-
-        /** 
-         * Search start of JSON string
-         * In this server we have the rule - 
-         * all body's post requests have construction {"json":...
-         */
-        char *pContent = strstr((char*)connection->request_data, "{\"json\":");
-        if (pContent)
-        {
-          /** Read the entire payload in <connection->request_data> */
-          while (strlen(pContent) < json_input_size)
+          char *resp_body_ptr = response;
+          if (is_authorized)
           {
-            if (netconn_recv(connection->accepted_sock, &in) == ERR_OK)
-            {
-              if ( netbuf_data( in, (void**)&inbuf_ptr, &buflen ) == ERR_OK )
-              {
-                if (inbuf_ptr != NULL)
-                  strncat((char*)connection->request_data, (char*)inbuf_ptr, buflen);
-                pContent = strstr((char*)connection->request_data, "{\"json\":");
-              }
-            }
-            netbuf_delete(in);
-          }
-          /** Call the POST request callback and receive response content */
-          __IO char* response = connection->web->postHandler( url, pContent+strlen("{\"json\":") );
-          
-          memset((char*)connection->resp_js_buff, 0x00, 2048);
-          if (response != NULL)
-          {
-            strcat((char*)connection->resp_js_buff, head_js_resp);
-            strcat((char*)connection->resp_js_buff, (char*)response);
+            resp_body_ptr += sprintf(response, "%s", HEADER_JSON_RESPONSE);
+            server_ptr->getHandler(url, resp_body_ptr);
           }
           else
           {
-            strcat((char*)connection->resp_js_buff, head_ok_resp);
+            response = HEADER_FORBIDDEN_RESPONSE;
           }
-          size_t size_send = strlen((char*)connection->resp_js_buff);
-          netconn_write( connection->accepted_sock, 
-                         (const unsigned char*)(connection->resp_js_buff), 
-                         size_send, 
-                         NETCONN_NOCOPY);
-          osDelay(10);
-        }
-        else
-        {
-          ErrContent++;
         }
       }
+      // If this is a POST request
+      else if(strncmp(inbuf_ptr, "POST /", 6) == 0)
+      {
+        int content_length = get_content_length(inbuf_ptr);
+        get_full_request_body(connection, content_length);
+        char *content_ptr = get_content_pointer(inbuf_ptr);
+        response = server_ptr->postHandler(url, content_ptr, response);
+        if (response)
+          add_header_to_response(response, HEADER_JSON_RESPONSE);
+        else
+          response = HEADER_OK_RESPONSE;
+      }
+      else
+        response = NULL;
+
+      if (response)
+      {
+        netconn_write( connection->accepted_sock, response, strlen(response), NETCONN_NOCOPY);
+        osDelay(10);
+      }
+      netbuf_delete(inbuf);
     }
-    /** Close connection, clear netbuf and connection */
     netconn_close(connection->accepted_sock);
-    netbuf_delete(inbuf);
     netconn_delete(connection->accepted_sock);
-    /** Now the task not work */
     connection->isopen = 0;
   }
 }
 
-
-static char* get_request_url( char *inbuf, char *type_request )
+/**
+ * Function is comparing the "token" parameter in the Cookie field.
+ * When creating an http stream, a random number is generated. 
+ * The unauthorized client does not know it and 
+ * therefore will be redirected to the authorization page. 
+ * After authorization, the "token" parameter will appear in the Cookie field
+ * and function return 1
+ */
+static uint8_t check_authorization( char *request, char *token )
 {
-  char *p = strstr(inbuf, type_request);
-  if (p)
+#if HTTP_USE_AUTH == 0
+  return 1;
+#else
+
+  static char tmp[32] = {0};
+  uint8_t auth = 0;
+
+  memset(tmp, 0x00, 32);
+  char *pAuthHead = strstr(request, "Cookie:");
+  if (pAuthHead)
   {
-    return (p + strlen(type_request) + 1);
+    char *pToken = strstr(pAuthHead, "token=");
+    if (pToken)
+    {
+      strncpy(tmp, pToken+strlen("token="), 30);
+      pToken = strtok(tmp, "\r");
+      auth = (strcmp(pToken, token) == 0) ? 1:0;
+    }
   }
-  return NULL;  
+  return auth;
+#endif
+}
+
+static char* get_request_url( char *inbuf )
+{
+  char *p = strchr(inbuf, '/');
+  if (p)
+    p++;
+  return p;
 }
 
 static uint8_t is_page_request( char *url )
@@ -286,15 +236,19 @@ static uint8_t is_page_request( char *url )
 static char *get_page_content( char *page_name, httpFileSystem_t *fs, uint32_t *page_size )
 {
   uint32_t file_size = 0;
-  char *content = find_request_content( page_name, fs, page_size );
+  char *page_name_ptr = page_name+1;
+  if (strncmp(page_name, "/ ", 2) == 0)
+    page_name_ptr = "index.html";
+
+  char *content = find_page( page_name, fs, page_size );
   if ( content )
   {
     return content;
   }
   else
   {
-    *page_size = strlen(head_not_found);
-    return head_not_found;
+    *page_size = strlen(HEADER_NOT_FOUND_RESPOSE);
+    return HEADER_NOT_FOUND_RESPOSE;
   }
 }
 
@@ -313,72 +267,49 @@ static char *find_page( char *page_name, httpFileSystem_t *fs, uint32_t *page_si
   return NULL;
 }
 
-/**
- * Function for comparing the "token" parameter in the Cookie field.
- * When creating an http stream, a random number is generated. 
- * The unauthorized client does not know it and 
- * therefore will be redirected to the authorization page. 
- * After authorization, the "token" parameter will appear in the Cookie field
- * and function return 1
- */
-static uint8_t compare_token( char *request, char *token )
+static int get_content_length( char *inbuf )
 {
-  static char tmp[32] = {0};
-  memset(tmp, 0x00, 32);
-  uint8_t auth = 0;
-  char *pAuthHead = strstr(request, "Cookie:");
-  if (pAuthHead)
+  char *p = strstr(inbuf, "Content-Length: ");
+  if (!p)
+    return 0;
+
+  p += strlen("Content-Length: ");
+  return (int)strtol(p, NULL, 10);
+}
+
+static void get_full_request_body( httpConnection_t *con, int content_len )
+{
+  struct netbuf *inbuf;
+  char *inbuf_ptr;
+  int buflen;
+
+  while (strlen(con->request_data) < content_len)
   {
-    /** Detaching field <token=> */
-    char *pToken = strstr(pAuthHead, "token=");
-    if (pToken)
+    if (netconn_recv(con->accepted_sock, &inbuf) == ERR_OK)
     {
-      /** Allocating a separate space for the strtok function */
-      strncpy(tmp, pToken+strlen("token="), 30);
-      /** Get a token value */
-      pToken = strtok(tmp, "\r");
-      /** Client token validation with token issued by server */
-      auth = (strcmp(pToken, token) == 0) ? 1:0;
+      netbuf_data(inbuf, &inbuf_ptr, &buflen);
+      if (inbuf_ptr)
+        strncat(con->request_data, inbuf_ptr, buflen);
+      netbuf_delete(inbuf);
     }
   }
-  return auth;
 }
 
-/**
- * Search function of the requested page
- * 
- * @param  request Url or a page name
- * @param  wsfs    Struct of website file system
- * @return         Pointer to the requested file or
- *                 NULL if file not found
+/** 
+ * In this server we have the rule - 
+ * all body's post requests have construction {"json":...
  */
-
-
-/**
- * Function of sending the page requested by the client.
- * If the requested page is not found, the header "File not found" is sent.
- * 
- * @param file_name String of file name
- * @param con       Current net connection
- * @param wsfs      Struct website file system
- */
-static void send_file_response( char *file_name, 
-                                struct netconn *con, 
-                                struct website_file_system *wsfs )
+static char* get_content_pointer( char *inbuf )
 {
-  size_t file_size = 0;
-  unsigned char* pContent = find_request_content( file_name, wsfs, &file_size );
-  if ( pContent != NULL )
-  {
-    netconn_write(con, pContent, file_size, NETCONN_NOCOPY);
-  }
-  else
-  {
-    netconn_write(con, head_not_found, strlen(head_not_found), NETCONN_NOCOPY);
-  }
-  osDelay(10);
+  char *p = strstr(inbuf, "{\"json\":");
+  if (p)
+    p += strlen("{\"json\":");
+  return p;
 }
 
-
-
-/*************************************** END OF FILE **********************************************/
+static void add_header_to_response( char *inbuf, char *header )
+{
+  char *end_header_ptr = inbuf+strlen(header);
+  memmove(end_header_ptr, inbuf, strlen(inbuf));
+  memmove(inbuf, header, strlen(header));
+}

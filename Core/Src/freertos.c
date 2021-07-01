@@ -48,7 +48,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-extern struct webworker webworker;
+httpServer_t http_server;
 /* USER CODE END Variables */
 osThreadId MainTaskHandle;
 osThreadId SecondTaskHandle;
@@ -133,15 +133,15 @@ void thread_MainTask(void const * argument)
   /* USER CODE BEGIN thread_MainTask */
   MX_LWIP_Init();
   /** Get a cont files of website and make site catalogue */
-  if (http_create_filesystem(&webworker.wsfs) == 0)
+  if (http_create_filesystem(&http_server.file_system) == 0)
   {
     /** Create new token and start http server */
     uint32_t new_token = 0;
     HAL_RNG_GenerateRandomNumber(&hrng, &new_token);
-    sprintf(webworker.token, "%x", new_token);
-    sys_thread_new("HTTP", http_server_task, (void*)&webworker, 1024, osPriorityNormal);
+    sprintf(http_server.token, "%x", new_token);
+    sys_thread_new("HTTP", http_server_task, (void*)&http_server, 1024, osPriorityNormal);
   }
-  sys_thread_new("WS", ws_server_task, (void*)&webworker, 1024, osPriorityNormal);
+  // sys_thread_new("WS", ws_server_task, (void*)&webworker, 1024, osPriorityNormal);
 
   /* Infinite loop */
   for(;;)
