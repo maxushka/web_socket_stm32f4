@@ -1,6 +1,0 @@
---cpu Cortex-M4.fp -g --apcs=interwork --pd "__MICROLIB SETA 1" -I ..\Core\Inc
--I.\RTE\_web_socket_stm32f4
--IC:\Users\UCR270\AppData\Local\Arm\Packs\ARM\CMSIS\5.6.0\CMSIS\Core\Include
--IC:\Users\UCR270\AppData\Local\Arm\Packs\Keil\STM32F4xx_DFP\2.14.0\Drivers\CMSIS\Device\ST\STM32F4xx\Include
---pd "__UVISION_VERSION SETA 525" --pd "_RTE_ SETA 1" --pd "STM32F407xx SETA 1"
---list startup_stm32f407xx.lst --xref -o web_socket_stm32f4\startup_stm32f407xx.o --depend web_socket_stm32f4\startup_stm32f407xx.d "startup_stm32f407xx.s"

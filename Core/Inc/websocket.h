@@ -51,7 +51,7 @@ typedef struct
 #else
   uint8_t send_buf[WS_SEND_BUFFER_SIZE];
 #endif
-  void (*msg_handler)( uint8_t *data, uint32_t len, ws_msg_t type );
+  void (*msg_handler)( uint8_t *data, uint32_t len, ws_type_t type );
   uint32_t connected_clients_cnt;
 } ws_server_t;
 

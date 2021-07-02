@@ -48,7 +48,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-httpServer_t http_server;
+extern http_server_t http_server;
+extern ws_server_t ws_server;
 /* USER CODE END Variables */
 osThreadId MainTaskHandle;
 osThreadId SecondTaskHandle;
@@ -141,7 +142,7 @@ void thread_MainTask(void const * argument)
     sprintf(http_server.token, "%x", new_token);
     sys_thread_new("HTTP", http_server_task, (void*)&http_server, 1024, osPriorityNormal);
   }
-  // sys_thread_new("WS", ws_server_task, (void*)&webworker, 1024, osPriorityNormal);
+  sys_thread_new("WS", ws_server_task, (void*)&ws_server, 1024, osPriorityNormal);
 
   /* Infinite loop */
   for(;;)

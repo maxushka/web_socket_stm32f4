@@ -441,6 +441,21 @@
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f4xx_hal_timebase_tim.c</FilePath>
             </File>
+            <File>
+              <FileName>http.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\http.c</FilePath>
+            </File>
+            <File>
+              <FileName>websocket.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\websocket.c</FilePath>
+            </File>
+            <File>
+              <FileName>jsonlib.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\jsonlib.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

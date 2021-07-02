@@ -6,14 +6,14 @@ const char *head_ws = "HTTP/1.1 101 Switching Protocols\n\
 Upgrade: websocket\n\
 Connection: Upgrade\nSec-WebSocket-Accept: \0";
 
-static void       ws_init_client_structs ( struct ws_server_ptr *ws );
+static void       ws_init_client_structs ( ws_server_t *ws );
 static void       ws_client_task         ( void * arg );
 static char*      create_ws_key_accept   ( char *inbuf );
-static char*      get_ws_key             ( char *buf, int *len );
-static uint32_t   get_message_len        ( char *msg );
+static char*      get_ws_key             ( char *buf, size_t *len );
+static uint32_t   get_message_len        ( uint8_t *msg );
 static uint8_t*   get_payload_ptr        ( uint8_t *msg );
-static uint8_t    is_masked_msg          ( char *msg );
-static char*      get_mask               ( char *msg );
+static uint8_t    is_masked_msg          ( uint8_t *msg );
+static uint8_t*   get_mask               ( uint8_t *msg );
 static void       unmask_message_payload ( uint8_t *payload, uint32_t len, uint8_t *mask );
 static uint8_t*   ws_set_size_to_frame   ( uint32_t size, uint8_t *out_frame );
 static uint8_t*   ws_set_data_to_frame   ( uint8_t *data, uint8_t size, uint8_t *out_frame );
@@ -55,7 +55,7 @@ void ws_server_task( void * arg )
         {
           // Resume the task that will handle the processing
           new_client->established = 1;
-          vTaskResume(new_client->tHandle);
+          vTaskResume(new_client->task_handle);
         }
       }
       else
@@ -71,10 +71,10 @@ static void ws_init_client_structs( ws_server_t *ws )
   ws_client_t *client;
 
   ws->connected_clients_cnt = 0;
-  for (int i = 0; i < NET_WS_MAX_CLIENTS; ++i)
+  for (int i = 0; i < WS_MAX_CLIENTS; ++i)
   {
     client = &ws->ws_clients[i];
-    memset((void*)(client), 0x00, sizeof(struct ws_client));
+    memset((void*)(client), 0x00, sizeof(ws_client_t));
     client->server_ptr = (void*)ws;
     xTaskCreate( ws_client_task, "ws_client", 256, (void*)client, 
                  osPriorityNormal, &client->task_handle );
@@ -128,7 +128,7 @@ static void ws_client_task( void * arg )
           uint8_t *mask = get_mask( inbuf_ptr );
           unmask_message_payload( payload, len, mask );
         }
-        server_ptr->msg_handler( payload, len, inbuf_ptr[0] );
+        server_ptr->msg_handler( payload, len, (ws_type_t)inbuf_ptr[0] );
       }
       netbuf_delete(inbuf);
     }
@@ -143,24 +143,23 @@ static void ws_client_task( void * arg )
 static char* create_ws_key_accept( char *inbuf )
 {
   static char concat_key[64] = {0};
-  static char hash[22] = {0}, hash_base64[22] = {0};
-  int len = 0, baselen = 0;
+  static char hash[22] = {0}, hash_base64[64] = {0};
+  size_t len = 0, baselen = 0;
 
   memset(concat_key, 0x00, 64);
   memset(hash, 0x00, 22);
-  memset(hash_base64, 0x00, 22);
+  memset(hash_base64, 0x00, 64);
 
   char *key = get_ws_key(inbuf, &len);
   strncpy(concat_key, key, len);
   strcat(concat_key, WS_GUID);
-
-  mbedtls_sha1(concat_key, 60, hash);
-  mbedtls_base64_encode( hash_base64, 22, &baselen, hash, strlen(hash) );
+  mbedtls_sha1((uint8_t*)concat_key, 60, (uint8_t*)hash);
+  mbedtls_base64_encode((uint8_t*)hash_base64, 64, &baselen, (uint8_t*)hash, 20);
 
   return hash_base64;
 }
 
-static char* get_ws_key( char *buf, int *len )
+static char* get_ws_key( char *buf, size_t *len )
 {
   char *p = strstr(buf, "Sec-WebSocket-Key: ");
   if (p)
@@ -171,7 +170,7 @@ static char* get_ws_key( char *buf, int *len )
   return p;
 }
 
-static uint32_t get_message_len( char *msg )
+static uint32_t get_message_len( uint8_t *msg )
 {
   uint32_t len = 0;
 
@@ -185,20 +184,20 @@ static uint32_t get_message_len( char *msg )
 
 static uint8_t* get_payload_ptr( uint8_t *msg )
 {
-  char *p = ( (msg[1] & 0x7F) == 126 ) ? (msg + 4) : (msg + 2);
+  uint8_t *p = ( (msg[1] & 0x7F) == 126 ) ? (msg + 4) : (msg + 2);
   if (is_masked_msg(msg))
     p += 4;
   return p;
 }
 
-static uint8_t is_masked_msg( char *msg )
+static uint8_t is_masked_msg( uint8_t *msg )
 {
   if ( (msg[1] & 0x80) == 0x80 )
     return 1;
   return 0;
 }
 
-static char* get_mask( char *msg )
+static uint8_t* get_mask( uint8_t *msg )
 {
   if ( (msg[1] & 0x7F) == 126 )
     return &msg[4];
@@ -212,7 +211,7 @@ static void unmask_message_payload( uint8_t *pld, uint32_t len, uint8_t *mask )
     pld[i] = mask[i%4] ^ pld[i];
 }
 
-void ws_send_message( ws_server_ptr_t *ws, ws_msg_t *msg )
+void ws_send_message( ws_server_t *ws, ws_msg_t *msg )
 {
   uint8_t *outbuf_ptr = ws->send_buf;
   int packet_size = msg->prtcl_size + msg->msg_size;
@@ -224,7 +223,7 @@ void ws_send_message( ws_server_ptr_t *ws, ws_msg_t *msg )
   memset(outbuf_ptr, 0x00, WS_SEND_BUFFER_SIZE);
   outbuf_ptr[0] = (uint8_t)msg->msg_type;
   outbuf_ptr = ws_set_size_to_frame(packet_size, &outbuf_ptr[1]);
-  outbuf_ptr = ws_set_data_to_frame(msg->protocol, msg->protocol_size, outbuf_ptr);
+  outbuf_ptr = ws_set_data_to_frame(msg->protocol, msg->prtcl_size, outbuf_ptr);
   outbuf_ptr = ws_set_data_to_frame(msg->message, msg->msg_size, outbuf_ptr);
   packet_size = outbuf_ptr - ws->send_buf;
 

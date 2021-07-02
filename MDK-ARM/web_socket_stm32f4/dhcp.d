@@ -25,12 +25,14 @@ web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_ext
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma_ex.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_cortex.h
+web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_can.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_eth.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
+web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rng.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 web_socket_stm32f4\dhcp.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 web_socket_stm32f4\dhcp.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

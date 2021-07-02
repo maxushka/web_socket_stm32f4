@@ -83,7 +83,7 @@ function create_connection_websocket() {
   var socket = new WebSocket("ws://"+window.location.hostname+":8765");
 
   socket.onopen = function(e) {
-    console.log("Соединение установлено");
+    alert("Соединение установлено");
   };
   socket.onmessage = function(event) {
     var blob = event.data;
@@ -120,7 +120,4 @@ function ObjToArr() {
 
 $(document).ready(function() {
   websocket = create_connection_websocket();
-
-  // if (FLAG_ANSWER == 1) {
-  // }
 });

@@ -24,14 +24,14 @@ typedef struct
   char file_name[64];
   int offset;
   int page_size;
-} httpFile_t;
+} http_file_t;
 
 typedef struct
 {
   uint8_t *flash_addr;
   uint32_t files_cnt;
-  httpFile_t *files;
-} httpFileSystem_t;
+  http_file_t *files;
+} http_fileSystem_t;
 
 typedef struct 
 {
@@ -42,15 +42,15 @@ typedef struct
   char response_data[HTTP_RESP_DATA_BUFF_SIZE];
   uint8_t isopen;
   uint32_t resp_js_buff_len;
-} httpConnection_t;
+} http_connection_t;
 
 typedef struct
 {
-  httpFileSystem_t file_system;
+  http_fileSystem_t file_system;
 #if HTTP_USE_SDRAM == 1
-  httpConnection_t *connections_pool[HTTP_MAX_CONNECTIONS];
+  http_connection_t *connections_pool[HTTP_MAX_CONNECTIONS];
 #else
-  httpConnection_t connections_pool[HTTP_MAX_CONNECTIONS];
+  http_connection_t connections_pool[HTTP_MAX_CONNECTIONS];
 #endif
 
   char token[32];
@@ -58,7 +58,7 @@ typedef struct
   char crnt_hash[32];
   void (*getHandler) ( char *url, char *outbuf );
   char* (*postHandler) ( char* url, char *json, char *outbuf );
-} httpServer_t;
+} http_server_t;
 
 /** Addresses HTTP ------------------------------------------------------------------------------ */
 #define HTTP_CONNECTION_START_ADDR       (0xC0000000)
@@ -69,8 +69,7 @@ typedef struct
 #define HTTP_SDRAM_WEB_SITE_ADDRESS      (HTTP_CONNECTION_END_ADDR)
 #define HTTP_SDRAM_WEB_SITE_END_ADDRESS  (HTTP_SDRAM_WEB_SITE_ADDRESS + HTTP_WEBSITE_SIZE)
 
-uint8_t http_create_filesystem( httpFileSystem_t *fs );
+uint8_t http_create_filesystem( http_fileSystem_t *fs );
 void    http_server_task( void * arg );
-
 
 #endif

@@ -9,31 +9,32 @@ Connection: close\n\
 Access-Control-Allow-Origin: *\n\
 Content-Type: application/json; charset=utf-8\nn";
 
-static void     create_tasks_for_connections( httpServer_t *server );
+static void     create_tasks_for_connections( http_server_t *server );
 static void     http_request_handler( void * arg );
 static uint8_t  check_authorization( char *request, char *token );
 static char*    get_request_url( char *inbuf );
 static uint8_t  is_page_request( char *url );
-static char*    get_page_content( char *page_name, httpFileSystem_t *fs, uint32_t *page_size );
-static char*    find_page( char *page_name, httpFileSystem_t *fs, uint32_t *page_size );
+static char*    get_page_content( char *page_name, http_fileSystem_t *fs, uint32_t *page_size );
+static char*    find_page( char *page_name, http_fileSystem_t *fs, uint32_t *page_size );
 static int      get_content_length( char *inbuf );
-static void     get_full_request_body( httpConnection_t *con, int content_len );
+static void     get_full_request_body( http_connection_t *con, int content_len );
 static char*    get_content_pointer( char *inbuf );
+static void     add_header_to_response( char *inbuf, const char *header );
 
 
-uint8_t http_create_filesystem( httpFileSystem_t *fs )
+uint8_t http_create_filesystem( http_fileSystem_t *fs )
 {
   uint8_t err = 1;
 
   memcpy(&fs->files_cnt, (uint8_t*)fs->flash_addr, sizeof(uint32_t));
   if ( (fs->files_cnt > 0) && (fs->files_cnt < 0xFFFFFFFF) )
   {
-    size_t size_files = sizeof(httpFile_t)*fs->files_cnt;
 #if NET_USE_SDRAM == 0
-    fs->files = (httpFile_t *)(fs->flash_addr+sizeof(uint32_t));
+    fs->files = (http_file_t *)(fs->flash_addr+sizeof(uint32_t));
     err = 0;
 #else
-    fs->files = (httpFile_t *)(HTTP_SDRAM_WEB_SITE_ADDRESS);
+    size_t size_files = sizeof(http_file_t)*fs->files_cnt;
+    fs->files = (http_file_t *)(HTTP_SDRAM_WEB_SITE_ADDRESS);
     if (fs->files != NULL)
     {
       memcpy((void*)fs->files, fs->flash_addr+sizeof(uint32_t), size_files);
@@ -49,12 +50,12 @@ uint8_t http_create_filesystem( httpFileSystem_t *fs )
  * When the stream of receiving messages is free, 
  * the structure of the received connection is passed to it.
  * 
- * @param arg httpServer_t structure (refer http.h)
+ * @param arg http_server_t structure (refer http.h)
  */
 void http_server_task( void * arg )
 { 
-  httpServer_t *server = (struct webworker*)arg;
-  httpConnection_t *connection;
+  http_server_t *server = (http_server_t*)arg;
+  http_connection_t *connection;
 
   struct netconn *conn = netconn_new(NETCONN_TCP);
   if (conn == NULL)
@@ -72,7 +73,7 @@ void http_server_task( void * arg )
 #if NET_USE_SDRAM == 1
       connection = &(*net_conn_pool[iTask]);
 #else
-      connection = &net_conn_pool[iTask];
+      connection = &server->connections_pool[iTask];
 #endif
       if (connection->isopen == 0)
       {
@@ -87,15 +88,15 @@ void http_server_task( void * arg )
   }
 }
 
-static void create_tasks_for_connections( httpServer_t *server )
+static void create_tasks_for_connections( http_server_t *server )
 {
-  const uint32_t offset = sizeof(httpConnection_t);
-  httpConnection_t *connection;
+  http_connection_t *connection;
 
   for (int iCon = 0; iCon < HTTP_MAX_CONNECTIONS; ++iCon)
   {
 #if NET_USE_SDRAM == 1
-    server->connections_pool[iCon] = (httpConnection_t*)(HTTP_CONNECTION_START_ADDR+(offset*iCon));
+    const uint32_t offset = sizeof(http_connection_t);
+    server->connections_pool[iCon] = (http_connection_t*)(HTTP_CONNECTION_START_ADDR+(offset*iCon));
     memset((void*)(*(&net_conn_pool[iCon])), 0x00, sizeof(net_connection));
     connection = &(*server->connections_pool[iCon]);
 #else
@@ -109,13 +110,12 @@ static void create_tasks_for_connections( httpServer_t *server )
 
 static void http_request_handler( void * arg )
 {
-  httpConnection_t *connection = (httpConnection_t*)arg;
-  httpServer_t *server_ptr = connection->server_ptr;
+  http_connection_t *connection = (http_connection_t*)arg;
+  http_server_t *server_ptr = connection->server_ptr;
   struct netbuf *inbuf = NULL;
   char *inbuf_ptr = NULL;
   uint16_t buflen = 0;
   uint8_t is_authorized = 0;
-  char tmp_url[HTTP_REQ_URL_BUFF_SIZE] = "";
 
   for(;;)
   {
@@ -132,7 +132,8 @@ static void http_request_handler( void * arg )
 
       is_authorized = check_authorization(inbuf_ptr, server_ptr->token);
       char *url = get_request_url(inbuf_ptr);
-      char *response = connection->response_data;
+      char *response_ptr = connection->response_data;
+      size_t response_size = 0;
 
       // If this is a GET request
       if (strncmp((char*)inbuf_ptr, "GET /", 5) == 0)
@@ -141,20 +142,21 @@ static void http_request_handler( void * arg )
         {
           if (!is_authorized && strstr(url, "html"))
             url = "auth.html";
-          response = get_page_content(url, server_ptr->file_system, size);
+          response_ptr = get_page_content(url, &server_ptr->file_system, &response_size);
         }
         else
         {
-          char *resp_body_ptr = response;
+          char *resp_body_ptr = response_ptr;
           if (is_authorized)
           {
-            resp_body_ptr += sprintf(response, "%s", HEADER_JSON_RESPONSE);
+            resp_body_ptr += sprintf(response_ptr, "%s", HEADER_JSON_RESPONSE);
             server_ptr->getHandler(url, resp_body_ptr);
           }
           else
           {
-            response = HEADER_FORBIDDEN_RESPONSE;
+            response_ptr = (char*)HEADER_FORBIDDEN_RESPONSE;
           }
+          response_size = strlen(response_ptr);
         }
       }
       // If this is a POST request
@@ -163,18 +165,19 @@ static void http_request_handler( void * arg )
         int content_length = get_content_length(inbuf_ptr);
         get_full_request_body(connection, content_length);
         char *content_ptr = get_content_pointer(inbuf_ptr);
-        response = server_ptr->postHandler(url, content_ptr, response);
-        if (response)
-          add_header_to_response(response, HEADER_JSON_RESPONSE);
+        response_ptr = server_ptr->postHandler(url, content_ptr, response_ptr);
+        if (response_ptr)
+          add_header_to_response(response_ptr, HEADER_JSON_RESPONSE);
         else
-          response = HEADER_OK_RESPONSE;
+          response_ptr = (char*)HEADER_OK_RESPONSE;
+        response_size = strlen(response_ptr);
       }
       else
-        response = NULL;
+        response_ptr = NULL;
 
-      if (response)
+      if (response_ptr)
       {
-        netconn_write( connection->accepted_sock, response, strlen(response), NETCONN_NOCOPY);
+        netconn_write( connection->accepted_sock, response_ptr, response_size, NETCONN_NOCOPY);
         osDelay(10);
       }
       netbuf_delete(inbuf);
@@ -221,8 +224,6 @@ static uint8_t check_authorization( char *request, char *token )
 static char* get_request_url( char *inbuf )
 {
   char *p = strchr(inbuf, '/');
-  if (p)
-    p++;
   return p;
 }
 
@@ -233,14 +234,13 @@ static uint8_t is_page_request( char *url )
   return 0;
 }
 
-static char *get_page_content( char *page_name, httpFileSystem_t *fs, uint32_t *page_size )
+static char *get_page_content( char *page_name, http_fileSystem_t *fs, uint32_t *page_size )
 {
-  uint32_t file_size = 0;
   char *page_name_ptr = page_name+1;
   if (strncmp(page_name, "/ ", 2) == 0)
     page_name_ptr = "index.html";
 
-  char *content = find_page( page_name, fs, page_size );
+  char *content = find_page( page_name_ptr, fs, page_size );
   if ( content )
   {
     return content;
@@ -248,13 +248,13 @@ static char *get_page_content( char *page_name, httpFileSystem_t *fs, uint32_t *
   else
   {
     *page_size = strlen(HEADER_NOT_FOUND_RESPOSE);
-    return HEADER_NOT_FOUND_RESPOSE;
+    return (char*)HEADER_NOT_FOUND_RESPOSE;
   }
 }
 
-static char *find_page( char *page_name, httpFileSystem_t *fs, uint32_t *page_size )
+static char *find_page( char *page_name, http_fileSystem_t *fs, uint32_t *page_size )
 {
-  httpFile_t *file_ptr;
+  http_file_t *file_ptr;
   for (int iFile = 0; iFile < fs->files_cnt; iFile++)
   {
     file_ptr = &fs->files[iFile];
@@ -277,17 +277,17 @@ static int get_content_length( char *inbuf )
   return (int)strtol(p, NULL, 10);
 }
 
-static void get_full_request_body( httpConnection_t *con, int content_len )
+static void get_full_request_body( http_connection_t *con, int content_len )
 {
   struct netbuf *inbuf;
   char *inbuf_ptr;
-  int buflen;
+  uint16_t buflen = 0;
 
   while (strlen(con->request_data) < content_len)
   {
     if (netconn_recv(con->accepted_sock, &inbuf) == ERR_OK)
     {
-      netbuf_data(inbuf, &inbuf_ptr, &buflen);
+      netbuf_data(inbuf, (void**)&inbuf_ptr, &buflen);
       if (inbuf_ptr)
         strncat(con->request_data, inbuf_ptr, buflen);
       netbuf_delete(inbuf);
@@ -307,7 +307,7 @@ static char* get_content_pointer( char *inbuf )
   return p;
 }
 
-static void add_header_to_response( char *inbuf, char *header )
+static void add_header_to_response( char *inbuf, const char *header )
 {
   char *end_header_ptr = inbuf+strlen(header);
   memmove(end_header_ptr, inbuf, strlen(inbuf));

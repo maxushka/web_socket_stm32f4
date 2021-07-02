@@ -73,4 +73,5 @@ web_socket_stm32f4\config.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/
 web_socket_stm32f4\config.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
 web_socket_stm32f4\config.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h
 web_socket_stm32f4\config.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdbool.h
-web_socket_stm32f4\config.o: ../Core/Inc/http_handlers.h
+web_socket_stm32f4\config.o: ../Core/Inc/websocket.h
+web_socket_stm32f4\config.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h
