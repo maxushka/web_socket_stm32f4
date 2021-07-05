@@ -1,6 +1,7 @@
 #include "websocket.h"
 #include "mbedtls/sha1.h"
 #include "mbedtls/base64.h"
+#include <string.h>
 
 const char *head_ws = "HTTP/1.1 101 Switching Protocols\n\
 Upgrade: websocket\n\

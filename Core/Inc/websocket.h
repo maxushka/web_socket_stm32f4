@@ -3,9 +3,6 @@
 
 #include "lwip/api.h"
 #include "cmsis_os.h"
-#include <string.h>
-#include <stdbool.h>
-
 
 #define WS_USE_SDRAM                 0
 #define WS_PORT                      8765
