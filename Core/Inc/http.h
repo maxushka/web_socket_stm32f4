@@ -1,12 +1,11 @@
-#ifndef _NET_H
-#define _NET_H
+#ifndef __HTTP_H
+#define __HTTP_H
 
 #include "lwip/opt.h"
 #include "lwip/arch.h"
 #include "lwip/api.h"
 #include "cmsis_os.h"
 #include <string.h>
-#include <stdbool.h>
 
 /** HTTP configuration */
 #define HTTP_USE_SDRAM                    0
